@@ -22,7 +22,8 @@ export function formatMessageDisplay(
   msg: Message,
   currentClientId: string
 ): string {
-  const senderInitial = msg.clientId ? msg.clientId.slice(0, 1) : "?";
+  //const senderInitial = msg.clientId ? msg.clientId.slice(0, 1) : "?";
+  const senderInitial = msg.clientId ? msg.clientId : "?";
   const userCount = msg.payload?.userCount ?? 0;
   const isPrivate =
     msg.payload?.recipientId &&
