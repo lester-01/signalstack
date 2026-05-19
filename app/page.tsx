@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useWebSocket } from "@/hooks/useWebSocket";
+//import { useWebSocket } from "@/hooks/useWebSocket";
+import { useChat } from "@/providers/websocketProvider";
 import { formatMessageDisplay, getClientLabel } from "@/lib/utils/timestamp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +19,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 // import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
-  const { status, messages, clientId, connectedClients, error, sendMessage } =
-    useWebSocket("ws://localhost:8080/ws");
+  // const { status, messages, clientId, connectedClients, error, sendMessage } =
+  //   useWebSocket("ws://localhost:8080/ws");
+  //const { status: providerStatus, messages: providerMessages, clientId: providerClientId, connectedClients: providerConnectedClients, error: providerError, sendMessage: providerSendMessage } = useChat();
+  const { status, messages, clientId, connectedClients, sendMessage } = useChat();
 
   const [input, setInput] = useState("");
   const [selectedRecipient, setSelectedRecipient] = useState("all");
@@ -84,13 +87,13 @@ export default function Page() {
       </Card>
 
       {/* Error Display */}
-      {error && (
+      {/* {error && (
         <Card className="border-red-200 bg-red-50">
           <CardContent className="pt-6">
             <p className="text-sm text-red-700">⚠️ {error}</p>
           </CardContent>
         </Card>
-      )}
+      )} */}
 
       {/* Recipient Selector */}
       <Card>
@@ -140,8 +143,7 @@ export default function Page() {
                   return (
                     <div key={idx}>
                       <div
-                        className={`text-xs font-mono leading-relaxed ${
-                          msg.type === "heartbeat"
+                        className={`text-xs font-mono leading-relaxed ${msg.type === "heartbeat"
                             ? "text-slate-400"
                             : msg.type === "join"
                               ? "text-green-600"
