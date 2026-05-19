@@ -34,8 +34,10 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//TODO: if clientId is provided in Message payload, use that instead of generating a new one. 
+	//TODO: also, use uuid instead of random int for better uniqueness
 	client := &Client{
-		ID:   generateID(),
+		ID:   generateID(), 
 		Conn: conn,
 		Send: make(chan Message, 10),
 	}

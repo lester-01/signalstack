@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+// import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
   const { status, messages, clientId, connectedClients, error, sendMessage } =
@@ -47,8 +47,9 @@ export default function Page() {
 
   // Get user count from latest heartbeat or join/leave
   const userCount = messages
-    .reverse()
-    .find((m) =>
+    //.reverse()
+    //.find((m) =>
+    .findLast((m) =>
       ["heartbeat", "join", "leave"].includes(m.type)
     )?.payload?.userCount ?? connectedClients.length;
 

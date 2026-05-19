@@ -18,6 +18,8 @@ export interface Message {
 
 export function useWebSocket(url: string) {
   const ws = useRef<WebSocket | null>(null);
+  const wsManuallyClosed = useRef(false);
+  const wsReconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const retryCount = useRef(0);
   const [status, setStatus] = useState<Status>("connecting");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -60,7 +62,8 @@ export function useWebSocket(url: string) {
         }
 
         // Add message to history
-        setMessages((prev) => [...prev, data]);
+        //setMessages((prev) => [...prev, data]);
+        setMessages((prev) => [...prev, data].slice(-500)); // Keep last 500 messages to prevent memory bloat
       } catch (err) {
         console.error("Error parsing message:", err);
       }
@@ -74,12 +77,21 @@ export function useWebSocket(url: string) {
     socket.onclose = () => {
       setStatus("closed");
 
+      if (wsManuallyClosed.current) {
+        console.log("WebSocket manually closed, not reconnecting");
+        return;
+      }
+      // prevent duplicate timers
+      if (wsReconnectTimeout.current) {
+        clearTimeout(wsReconnectTimeout.current);
+      }
+
       // Calculate exponential backoff: 1s, 2s, 4s, 8s, max 10s
       const delay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
       retryCount.current += 1;
 
       console.log(`Reconnecting in ${delay}ms...`);
-      setTimeout(() => connect(), delay);
+      wsReconnectTimeout.current = setTimeout(() => connect(), delay);
     };
   };
 
@@ -93,8 +105,13 @@ export function useWebSocket(url: string) {
     connect();
 
     return () => {
+      wsManuallyClosed.current = true;
       if (ws.current) {
         ws.current.close();
+      }
+      // cancel any pending reconnection attempts
+      if (wsReconnectTimeout.current) {
+        clearTimeout(wsReconnectTimeout.current);
       }
     };
   }, []);
