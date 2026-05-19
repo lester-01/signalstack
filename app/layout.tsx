@@ -21,10 +21,10 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", geist.variable)}
+      className={cn("antialiased dark", fontMono.variable, "font-sans", geist.variable)}
     >
-      <body>
-        <ThemeProvider>
+      <body className="bg-slate-950 text-slate-50">
+        <ThemeProvider defaultTheme="dark" forcedTheme="dark">
           <WebSocketProvider>
             {children}
           </WebSocketProvider>

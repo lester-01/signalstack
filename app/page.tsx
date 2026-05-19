@@ -21,7 +21,7 @@ import { MessageTypeEnum } from "@/providers/websocketProvider";
 // import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
-  const { status: websocketStatus, messages, clientId, connectedClients, sendMessage } = useChat();
+  const { status: websocketStatus, authState, messages, clientId, connectedClients, sendMessage } = useChat();
 
   const [input, setInput] = useState("");
   const [selectedRecipient, setSelectedRecipient] = useState("all");
@@ -48,44 +48,52 @@ export default function Page() {
   };
 
   return (
-    <div className="flex h-screen flex-col gap-4 bg-slate-50 p-4">
+    <div className="flex h-screen flex-col gap-4 bg-slate-950 p-4">
       {/* Header */}
-      <Card>
+      <Card className="border-slate-800 bg-slate-900">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <CardTitle>WebSocket Chat</CardTitle>
-              <Badge
-                variant={
-                  websocketStatus === WebSocketStateEnum.OPEN
-                    ? "default"
-                    : websocketStatus === WebSocketStateEnum.CLOSED
-                      ? "destructive"
-                      : "secondary"
-                }
-              >
-                {websocketStatus}
-              </Badge>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-2xl">WebSocket Chat</CardTitle>
+              <div className="text-sm text-slate-400">
+                <span className="font-medium">Your ID:</span> <span className="text-slate-300">{clientId || "..."}</span>
+              </div>
             </div>
-            <div className="text-sm">
-              <span className="font-medium">Your ID:</span> {clientId || "..."}
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-400">Connection:</span>
+                <Badge
+                  variant={
+                    websocketStatus === WebSocketStateEnum.OPEN
+                      ? "default"
+                      : websocketStatus === WebSocketStateEnum.CLOSED
+                        ? "destructive"
+                        : "secondary"
+                  }
+                >
+                  {websocketStatus}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-400">Auth:</span>
+                <Badge
+                  variant={
+                    authState === "authenticated"
+                      ? "default"
+                      : authState === "unauthenticated"
+                        ? "destructive"
+                        : "secondary"
+                  }
+                >
+                  {authState}
+                </Badge>
+              </div>
             </div>
-          </div>
-          <div className="mt-2 text-sm text-slate-600">
-            <span className="font-medium">{connectedClients.length} users online</span>
+            <div className="text-sm text-slate-400">
+              <span className="font-medium">{connectedClients.length} users online</span>
+            </div>
           </div>
         </CardHeader>
-        <CardContent className="pt-0">
-          <p className="text-sm text-slate-500">
-            This is a demo of a WebSocket chat application built with Next.js. Open multiple tabs to see real-time communication in action!
-          </p>
-          <Link
-            href="/dashboard"
-            className="text-blue-600 underline"
-          >
-            Go to Dashboard
-          </Link>
-        </CardContent>
       </Card>
 
       {/* Error Display */}
@@ -98,15 +106,15 @@ export default function Page() {
       )} */}
 
       {/* Recipient Selector */}
-      <Card>
+      <Card className="border-slate-800 bg-slate-900">
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
-            <label className="text-sm font-medium">Send to:</label>
+            <label className="text-sm font-medium text-slate-300">Send to:</label>
             <Select value={selectedRecipient} onValueChange={setSelectedRecipient}>
-              <SelectTrigger className="w-64">
+              <SelectTrigger className="w-64 border-slate-700 bg-slate-800 text-slate-200">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="border-slate-700 bg-slate-900">
                 <SelectItem value="all">Everyone</SelectItem>
                 {connectedClients
                   .filter((id) => id !== clientId)
@@ -122,15 +130,15 @@ export default function Page() {
       </Card>
 
       {/* Messages Display */}
-      <Card className="flex flex-1 flex-col overflow-hidden">
+      <Card className="flex flex-1 flex-col overflow-hidden border-slate-800 bg-slate-900">
         <CardHeader>
-          <CardTitle className="text-base">Message History</CardTitle>
+          <CardTitle className="text-base text-slate-200">Message History</CardTitle>
         </CardHeader>
         <CardContent className="flex-1 overflow-hidden p-0">
           <ScrollArea className="h-full w-full">
             <div className="flex flex-col gap-2 p-4">
               {messages.length === 0 ? (
-                <p className="text-sm text-slate-400">No messages yet...</p>
+                <p className="text-sm text-slate-500">No messages yet...</p>
               ) : (
                 messages.map((msg, idx) => {
                   const displayText = formatMessageDisplay(msg, clientId);
@@ -146,17 +154,17 @@ export default function Page() {
                     <div key={idx}>
                       <div
                         className={`text-xs font-mono leading-relaxed ${msg.type === MessageTypeEnum.HEARTBEAT
-                            ? "text-slate-400"
+                            ? "text-slate-600"
                             : msg.type === MessageTypeEnum.JOIN
-                              ? "text-green-600"
+                              ? "text-green-400"
                               : msg.type === MessageTypeEnum.LEAVE
-                                ? "text-orange-600"
+                                ? "text-orange-400"
                                 : isPartOfPrivate
-                                  ? "italic text-purple-600"
-                                  : "text-slate-700"
+                                  ? "italic text-purple-400"
+                                  : "text-slate-300"
                           }`}
                       >
-                        <span className="text-slate-400">[{msg.timestamp}]</span>{" "}
+                        <span className="text-slate-500">[{msg.timestamp}]</span>{" "}
                         {displayText}
                       </div>
                     </div>
@@ -170,7 +178,7 @@ export default function Page() {
       </Card>
 
       {/* Input Section */}
-      <Card>
+      <Card className="border-slate-800 bg-slate-900">
         <CardContent className="pt-6">
           <div className="flex gap-2">
             <Input
@@ -180,7 +188,7 @@ export default function Page() {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={websocketStatus !== WebSocketStateEnum.OPEN}
-              className="flex-1"
+              className="flex-1 border-slate-700 bg-slate-800 text-slate-200 placeholder-slate-500"
             />
             <Button
               onClick={handleSend}
