@@ -114,9 +114,11 @@ export function WebSocketProvider({
       //
       const authPayload = {
         type: MessageTypeEnum.AUTH,
-        token: localStorage.getItem("token") || "",
-        clientId: storeRef.current.clientId || undefined,
-        clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
+        payload: {
+          token: localStorage.getItem("token") || "secret-token", // Replace with real token retrieval
+          clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
+          clientId: storeRef.current.clientId || undefined,
+        },
       };
       setStore((prev) => ({ ...prev, authState: AuthStateEnum.AUTHENTICATING }));
       ws.current?.send(JSON.stringify(authPayload));
