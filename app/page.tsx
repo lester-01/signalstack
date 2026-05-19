@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-//import { useWebSocket } from "@/hooks/useWebSocket";
 import { useChat } from "@/providers/websocketProvider";
 import { formatMessageDisplay, getClientLabel } from "@/lib/utils/timestamp";
 import { Button } from "@/components/ui/button";
@@ -17,13 +16,12 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Link from "next/link";
+import { WebSocketStateEnum } from "@/providers/websocketProvider";
+import { MessageTypeEnum } from "@/providers/websocketProvider";
 // import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
-  // const { status, messages, clientId, connectedClients, error, sendMessage } =
-  //   useWebSocket("ws://localhost:8080/ws");
-  //const { status: providerStatus, messages: providerMessages, clientId: providerClientId, connectedClients: providerConnectedClients, error: providerError, sendMessage: providerSendMessage } = useChat();
-  const { status, messages, clientId, connectedClients, sendMessage } = useChat();
+  const { status: websocketStatus, messages, clientId, connectedClients, sendMessage } = useChat();
 
   const [input, setInput] = useState("");
   const [selectedRecipient, setSelectedRecipient] = useState("all");
@@ -36,7 +34,7 @@ export default function Page() {
 
   const handleSend = () => {
     const trimmedInput = input.trim();
-    if (trimmedInput && status === "open") {
+    if (trimmedInput && websocketStatus === WebSocketStateEnum.OPEN) {
       sendMessage(trimmedInput, selectedRecipient);
       setInput("");
     }
@@ -49,14 +47,6 @@ export default function Page() {
     }
   };
 
-  // Get user count from latest heartbeat or join/leave
-  const userCount = messages
-    //.reverse()
-    //.find((m) =>
-    .findLast((m) =>
-      ["heartbeat", "join", "leave"].includes(m.type)
-    )?.payload?.userCount ?? connectedClients.length;
-
   return (
     <div className="flex h-screen flex-col gap-4 bg-slate-50 p-4">
       {/* Header */}
@@ -67,14 +57,14 @@ export default function Page() {
               <CardTitle>WebSocket Chat</CardTitle>
               <Badge
                 variant={
-                  status === "open"
+                  websocketStatus === WebSocketStateEnum.OPEN
                     ? "default"
-                    : status === "closed"
+                    : websocketStatus === WebSocketStateEnum.CLOSED
                       ? "destructive"
                       : "secondary"
                 }
               >
-                {status}
+                {websocketStatus}
               </Badge>
             </div>
             <div className="text-sm">
@@ -82,7 +72,7 @@ export default function Page() {
             </div>
           </div>
           <div className="mt-2 text-sm text-slate-600">
-            <span className="font-medium">{userCount} users online</span>
+            <span className="font-medium">{connectedClients.length} users online</span>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
@@ -155,11 +145,11 @@ export default function Page() {
                   return (
                     <div key={idx}>
                       <div
-                        className={`text-xs font-mono leading-relaxed ${msg.type === "heartbeat"
+                        className={`text-xs font-mono leading-relaxed ${msg.type === MessageTypeEnum.HEARTBEAT
                             ? "text-slate-400"
-                            : msg.type === "join"
+                            : msg.type === MessageTypeEnum.JOIN
                               ? "text-green-600"
-                              : msg.type === "leave"
+                              : msg.type === MessageTypeEnum.LEAVE
                                 ? "text-orange-600"
                                 : isPartOfPrivate
                                   ? "italic text-purple-600"
@@ -189,12 +179,12 @@ export default function Page() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              disabled={status !== "open"}
+              disabled={websocketStatus !== WebSocketStateEnum.OPEN}
               className="flex-1"
             />
             <Button
               onClick={handleSend}
-              disabled={!input.trim() || status !== "open"}
+              disabled={!input.trim() || websocketStatus !== WebSocketStateEnum.OPEN}
             >
               Send
             </Button>

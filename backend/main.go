@@ -10,6 +10,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	MessageTypeMessage      = "message"
+	MessageTypeAuth         = "auth"
+	MessageTypeAuthResponse = "auth_response"
+)
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
@@ -34,18 +40,37 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//TODO: if clientId is provided in Message payload, use that instead of generating a new one. 
+	//TODO: if clientId is provided in Message payload, use that instead of generating a new one.
 	//TODO: also, use uuid instead of random int for better uniqueness
 	client := &Client{
-		ID:   generateID(), 
+		ID:   generateID(),
 		Conn: conn,
 		Send: make(chan Message, 10),
 	}
 
 	hub.Register <- client
 
+	// Start auth timeout timer
+	go func(client *Client) {
+		time.Sleep(10 * time.Second)
+
+		if !client.Authenticated {
+			log.Printf("Auth timeout")
+
+			client.Conn.WriteJSON(Message{
+				Type: "auth_response",
+				Payload: map[string]interface{}{
+					"success": false,
+					"reason":  "auth timeout",
+				},
+			})
+
+			client.Conn.Close()
+		}
+	}(client)
+
 	// Writer goroutine: reads from client.Send channel and writes to WebSocket
-	go func() {
+	go func(client *Client) {
 		defer func() {
 			conn.Close()
 		}()
@@ -56,10 +81,10 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	}()
+	}(client)
 
 	// Reader goroutine: reads from WebSocket and writes to hub.Broadcast
-	go func() {
+	go func(client *Client) {
 		defer func() {
 			hub.Unregister <- client
 			conn.Close()
@@ -75,21 +100,95 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// Add clientId and formatted timestamp
-			msg.ClientID = client.ID
-			msg.Timestamp = getCurrentTimestamp()
+			//
+			switch msg.Type {
+			case "auth":
+				handleAuth(client, msg)
+			case "message":
+				if !client.Authenticated {
+					log.Printf("Unauthenticated message attempt")
+					continue
+				}
 
-			// Ensure recipientId defaults to "all"
-			if msg.Payload == nil {
-				msg.Payload = make(map[string]interface{})
+				handleChatMessage(hub, client, msg)
+			default:
+				log.Printf("Unknown message type: %s", msg.Type)
 			}
-			if _, ok := msg.Payload["recipientId"]; !ok {
-				msg.Payload["recipientId"] = "all"
-			}
+			//
 
-			hub.Broadcast <- msg
 		}
-	}()
+	}(client)
+}
+
+func handleAuth(client *Client, msg Message) {
+	token, _ := msg.Payload["token"].(string)
+	clientID, _ := msg.Payload["clientId"].(string)
+	clientType, _ := msg.Payload["clientType"].(string)
+
+	// Validate token
+	if token == "" {
+		response := Message{
+			Type: "auth_response",
+			Payload: map[string]interface{}{
+				"success": false,
+				"reason":  "missing token",
+			},
+		}
+
+		client.Conn.WriteJSON(response)
+		client.Conn.Close()
+		return
+	}
+	// hardcode token for demo purposes
+	if token != "secret-token" {
+		response := Message{
+			Type: "auth_response",
+			Payload: map[string]interface{}{
+				"success": false,
+				"reason":  "invalid token",
+			},
+		}
+
+		client.Conn.WriteJSON(response)
+		client.Conn.Close()
+		return
+	}
+
+	// Session restore logic
+	if clientID != "" {
+		client.ID = clientID
+	}
+
+	client.Authenticated = true
+	client.Token = token
+	client.ClientType = clientType
+
+	response := Message{
+		Type:      "auth_response",
+		ClientID:  client.ID,
+		Timestamp: getCurrentTimestamp(),
+		Payload: map[string]interface{}{
+			"success": true,
+		},
+	}
+
+	client.Conn.WriteJSON(response)
+}
+
+func handleChatMessage(hub *Hub, client *Client, msg Message) {
+	// Add clientId and formatted timestamp
+	msg.ClientID = client.ID
+	msg.Timestamp = getCurrentTimestamp()
+
+	// Ensure recipientId defaults to "all"
+	if msg.Payload == nil {
+		msg.Payload = make(map[string]interface{})
+	}
+	if _, ok := msg.Payload["recipientId"]; !ok {
+		msg.Payload["recipientId"] = "all"
+	}
+
+	hub.Broadcast <- msg
 }
 
 // startHeartbeat sends heartbeat messages to all clients every 10 seconds

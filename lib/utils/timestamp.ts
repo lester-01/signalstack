@@ -1,4 +1,5 @@
-import { Message } from "@/hooks/useWebSocket";
+//import { Message } from "@/hooks/useWebSocket";
+import { Message } from "@/providers/websocketProvider";
 
 /**
  * Checks if a message is private (not visible to all clients)

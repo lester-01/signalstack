@@ -8,8 +8,28 @@ import {
   useState,
 } from "react";
 
-type Message = {
-  type: "message" | "heartbeat" | "join" | "leave";
+export const CLIENT_TYPE = {
+  BROWSER: "browser",
+  ANDROID: "android_client",
+  LINUX: "linux_client",
+} as const;
+
+export type ClientType =
+  typeof CLIENT_TYPE[keyof typeof CLIENT_TYPE];
+
+export const MessageTypeEnum = {
+  MESSAGE: "message",
+  HEARTBEAT: "heartbeat",
+  JOIN: "join",
+  LEAVE: "leave",
+  AUTH: "auth",
+  AUTH_RESPONSE: "auth_response"
+} as const;
+
+export type MessageType = typeof MessageTypeEnum[keyof typeof MessageTypeEnum];
+
+export type Message = {
+  type: MessageType;
   clientId?: string;
   timestamp: string;
   payload?: {
@@ -17,14 +37,33 @@ type Message = {
     recipientId?: string;
     userCount?: number;
     clientList?: string[];
+    success?: boolean; // For auth response
   };
 };
 
+export const WebSocketStateEnum = {
+  CONNECTING: "connecting",
+  OPEN: "open",
+  CLOSED: "closed",
+  RECONNECTING: "reconnecting"
+} as const;
+
+export type WebSocketState = typeof WebSocketStateEnum[keyof typeof WebSocketStateEnum];
+
+const AuthStateEnum = {
+  UNAUTHENTICATED: "unauthenticated",
+  AUTHENTICATING: "authenticating",
+  AUTHENTICATED: "authenticated"
+} as const;
+export type AuthState = typeof AuthStateEnum[keyof typeof AuthStateEnum];
+
 type Store = {
-  status: "connecting" | "open" | "closed" | "reconnecting";
+  status: WebSocketState;
   clientId: string;
   messages: Message[];
   connectedClients: string[];
+  clientType: ClientType;
+  authState: AuthState;
 };
 
 type ContextValue = Store & {
@@ -41,11 +80,14 @@ export function WebSocketProvider({
   // -----------------------
   // STATE (STORE)
   // -----------------------
-  const [status, setStatus] =
-    useState<Store["status"]>("connecting");
-  const [clientId, setClientId] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [connectedClients, setConnectedClients] = useState<string[]>([]);
+  const [store, setStore] = useState<Store>({
+    status: WebSocketStateEnum.CONNECTING,
+    clientId: "",
+    messages: [],
+    connectedClients: [],
+    clientType: CLIENT_TYPE.BROWSER,
+    authState: AuthStateEnum.UNAUTHENTICATED,
+  });
 
   // -----------------------
   // SOCKET REFS (NO RERENDER)
@@ -54,48 +96,92 @@ export function WebSocketProvider({
   const retryCount = useRef(0);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const manuallyClosed = useRef(false);
+  const storeRef = useRef(store);
 
   // -----------------------
   // CONNECT LOGIC
   // -----------------------
   const connect = () => {
-    setStatus(retryCount.current > 0 ? "reconnecting" : "connecting");
+    setStore((prev) => ({ ...prev, status: retryCount.current > 0 ? WebSocketStateEnum.RECONNECTING : WebSocketStateEnum.CONNECTING }));
 
     const socket = new WebSocket("ws://localhost:8080/ws");
     ws.current = socket;
 
     socket.onopen = () => {
-      setStatus("open");
+      setStore((prev) => ({ ...prev, status: "open" }));
       retryCount.current = 0;
+
+      //
+      const authPayload = {
+        type: MessageTypeEnum.AUTH,
+        token: localStorage.getItem("token") || "",
+        clientId: storeRef.current.clientId || undefined,
+        clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
+      };
+      setStore((prev) => ({ ...prev, authState: AuthStateEnum.AUTHENTICATING }));
+      ws.current?.send(JSON.stringify(authPayload));
     };
 
     socket.onmessage = (event) => {
       const data: Message = JSON.parse(event.data);
 
-      // client list updates
+      // -------------------------
+      // 1. CLIENT LIST UPDATES
+      // -------------------------
       if (
-        data.type === "join" ||
-        data.type === "leave" ||
-        data.type === "heartbeat"
+        data.type === MessageTypeEnum.JOIN ||
+        data.type === MessageTypeEnum.LEAVE ||
+        data.type === MessageTypeEnum.HEARTBEAT
       ) {
         if (data.payload?.clientList) {
-          setConnectedClients(data.payload.clientList);
+          setStore((prev) => ({ ...prev, connectedClients: data.payload?.clientList ?? [] }));
         }
       }
 
-      // clientId init
-      if (!clientId && data.clientId) {
-        setClientId(data.clientId);
+      // -------------------------
+      // 2. CLIENT ID INITIALIZATION
+      // -------------------------
+      if (!storeRef.current.clientId && data.clientId) {
+        setStore((prev) => ({ ...prev, clientId: data.clientId ?? "" }));
         localStorage.setItem("websocket-clientid", data.clientId);
       }
 
-      setMessages((prev) => [...prev, data]);
+      // -------------------------
+      // 3. AUTH RESPONSE HANDLING (NEW)
+      // -------------------------
+      if (data.type === MessageTypeEnum.AUTH_RESPONSE) {
+        setStore((prev) => ({
+          ...prev,
+          status: data.payload?.success ? WebSocketStateEnum.OPEN : WebSocketStateEnum.CLOSED,
+          authState: data.payload?.success ? AuthStateEnum.AUTHENTICATED : AuthStateEnum.UNAUTHENTICATED,
+        }));
+
+        // if auth failed, dont keep retrying
+        if (!data.payload?.success) {
+          manuallyClosed.current = true;
+          ws.current?.close();
+        }
+
+        return; // IMPORTANT: don't treat as chat message
+      }
+
+      // -------------------------
+      // 4. CHAT MESSAGES ONLY
+      // -------------------------
+      if (data.type ===  MessageTypeEnum.MESSAGE) {
+        setStore((prev) => ({
+          ...prev,
+          messages: [...prev.messages, data],
+        }));
+      }
+
+      //setStore((prev) => ({ ...prev, messages: [...prev.messages, data] }));
     };
 
     socket.onclose = () => {
-        setStatus("closed");
+      setStore((prev) => ({ ...prev, status: WebSocketStateEnum.CLOSED }));
 
-        if (manuallyClosed.current) return;
+      if (manuallyClosed.current) return;
 
       const delay = Math.min(
         1000 * Math.pow(2, retryCount.current),
@@ -114,7 +200,7 @@ export function WebSocketProvider({
     };
 
     socket.onerror = () => {
-      setStatus("closed");
+      setStore((prev) => ({ ...prev, status: WebSocketStateEnum.CLOSED }));
     };
   };
 
@@ -126,7 +212,7 @@ export function WebSocketProvider({
 
     ws.current.send(
       JSON.stringify({
-        type: "message",
+        type: MessageTypeEnum.MESSAGE,
         timestamp: "",
         payload: { text, recipientId },
       })
@@ -134,11 +220,18 @@ export function WebSocketProvider({
   };
 
   // -----------------------
+  // SYNC STORE REF (FOR WS CALLBACKs)
+  // -----------------------
+  useEffect(() => {
+    storeRef.current = store;
+  }, [store]);
+
+  // -----------------------
   // INIT / CLEANUP
   // -----------------------
   useEffect(() => {
     const stored = localStorage.getItem("websocket-clientid");
-    if (stored) setClientId(stored);
+    if (stored) setStore((prev) => ({ ...prev, clientId: stored }));
 
     connect();
 
@@ -155,21 +248,18 @@ export function WebSocketProvider({
 
   // Debugging: Log when provider mounts/unmounts
   useEffect(() => {
-  console.log("Provider mounted");
+    console.log("websocketProvider mounted");
 
-  return () => {
-    console.log("Provider unmounted");
-  };
-}, []);
+    return () => {
+      console.log("websocketProvider unmounted");
+    };
+  }, []);
 
   // -----------------------
   // CONTEXT VALUE
   // -----------------------
   const value: ContextValue = {
-    status,
-    clientId,
-    messages,
-    connectedClients,
+    ...store,
     sendMessage,
   };
 

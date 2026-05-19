@@ -7,4 +7,8 @@ type Client struct {
 	ID   string
 	Conn *websocket.Conn
 	Send chan Message
+
+	Authenticated bool
+    Token         string
+    ClientType    string
 }
