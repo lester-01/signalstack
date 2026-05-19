@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import Link from "next/link";
 // import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
@@ -84,6 +85,17 @@ export default function Page() {
             <span className="font-medium">{userCount} users online</span>
           </div>
         </CardHeader>
+        <CardContent className="pt-0">
+          <p className="text-sm text-slate-500">
+            This is a demo of a WebSocket chat application built with Next.js. Open multiple tabs to see real-time communication in action!
+          </p>
+          <Link
+            href="/dashboard"
+            className="text-blue-600 underline"
+          >
+            Go to Dashboard
+          </Link>
+        </CardContent>
       </Card>
 
       {/* Error Display */}
@@ -152,7 +164,7 @@ export default function Page() {
                                 : isPartOfPrivate
                                   ? "italic text-purple-600"
                                   : "text-slate-700"
-                        }`}
+                          }`}
                       >
                         <span className="text-slate-400">[{msg.timestamp}]</span>{" "}
                         {displayText}
