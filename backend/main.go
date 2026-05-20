@@ -14,6 +14,7 @@ const (
 	MessageTypeMessage      = "message"
 	MessageTypeAuth         = "auth"
 	MessageTypeAuthResponse = "auth_response"
+	MessageTypeHeartbeat    = "heartbeat"
 )
 
 var upgrader = websocket.Upgrader{
@@ -40,54 +41,56 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//TODO: if clientId is provided in Message payload, use that instead of generating a new one.
-	//TODO: also, use uuid instead of random int for better uniqueness
-	client := &Client{
-		ID:   generateID(),
-		Conn: conn,
-		Send: make(chan Message, 10),
-	}
-
-	hub.Register <- client
+	client := NewClient(conn)
 
 	// Start auth timeout timer
-	go func(client *Client) {
-		time.Sleep(10 * time.Second)
+	go func(hub *Hub, client *Client) {
+		select {
+		case <-time.After(10 * time.Second):
+			if !client.isAuthenticated() {
+				log.Printf("Auth timeout")
 
-		if !client.Authenticated {
-			log.Printf("Auth timeout")
+				msg := Message{
+					Type: MessageTypeAuthResponse,
+					Payload: map[string]interface{}{
+						"success": false,
+						"reason":  "auth timeout",
+					},
+				}
 
-			client.Conn.WriteJSON(Message{
-				Type: "auth_response",
-				Payload: map[string]interface{}{
-					"success": false,
-					"reason":  "auth timeout",
-				},
-			})
-
-			client.Conn.Close()
+				hub.sendMessageToClient(client, msg)
+				client.disconnect()
+			}
+		case <-client.ctx.Done():
+			return
 		}
-	}(client)
+	}(hub, client)
 
 	// Writer goroutine: reads from client.Send channel and writes to WebSocket
-	go func(client *Client) {
+	go func(hub *Hub, client *Client) {
 		defer func() {
-			conn.Close()
+			hub.unregisterClient(client)
 		}()
-		for msg := range client.Send {
-			err := conn.WriteJSON(msg)
-			if err != nil {
-				log.Println("Write error:", err)
+
+		for {
+			select {
+			case msg := <-client.send:
+				err := conn.WriteJSON(msg)
+				if err != nil {
+					log.Println("Write error:", err)
+					return
+				}
+
+			case <-client.ctx.Done():
 				return
 			}
 		}
-	}(client)
+	}(hub, client)
 
 	// Reader goroutine: reads from WebSocket and writes to hub.Broadcast
-	go func(client *Client) {
+	go func(hub *Hub, client *Client) {
 		defer func() {
-			hub.Unregister <- client
-			conn.Close()
+			hub.unregisterClient(client)
 		}()
 
 		for {
@@ -100,27 +103,29 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			//
 			switch msg.Type {
-			case "auth":
-				handleAuth(client, msg)
-			case "message":
-				if !client.Authenticated {
+			case MessageTypeAuth:
+				handleAuth(hub, client, msg)
+			case MessageTypeMessage:
+				if !client.isAuthenticated() {
 					log.Printf("Unauthenticated message attempt")
 					continue
 				}
-
 				handleChatMessage(hub, client, msg)
 			default:
 				log.Printf("Unknown message type: %s", msg.Type)
 			}
-			//
-
 		}
-	}(client)
+	}(hub, client)
 }
 
-func handleAuth(client *Client, msg Message) {
+func handleAuth(hub *Hub, client *Client, msg Message) {
+	// if already authenticated, ignore
+	if client.isAuthenticated() {
+		log.Printf("Client %s attempted to authenticate again", client.getID())
+		return
+	}
+	
 	token, _ := msg.Payload["token"].(string)
 	clientID, _ := msg.Payload["clientId"].(string)
 	clientType, _ := msg.Payload["clientType"].(string)
@@ -128,56 +133,68 @@ func handleAuth(client *Client, msg Message) {
 	// Validate token
 	if token == "" {
 		response := Message{
-			Type: "auth_response",
+			Type: MessageTypeAuthResponse,
 			Payload: map[string]interface{}{
 				"success": false,
 				"reason":  "missing token",
 			},
 		}
-
-		client.Conn.WriteJSON(response)
-		client.Conn.Close()
+		// client not yet registered, send back response then close connection
+		hub.sendMessageToClient(client, response)
+		client.disconnect()
 		return
 	}
 	// hardcode token for demo purposes
 	if token != "secret-token" {
 		response := Message{
-			Type: "auth_response",
+			Type: MessageTypeAuthResponse,
 			Payload: map[string]interface{}{
 				"success": false,
 				"reason":  "invalid token",
 			},
 		}
 
-		client.Conn.WriteJSON(response)
-		client.Conn.Close()
+		// client not yet registered, send back response then close connection
+		hub.sendMessageToClient(client, response)
+		client.disconnect()
 		return
 	}
 
 	// Session restore logic
-	if clientID != "" {
-		client.ID = clientID
+	//generate new client ID if not provided (for new sessions)
+	//TODO: also, use uuid instead of random int for better uniqueness
+	if clientID == "" {
+		clientID = generateID()
 	}
 
-	client.Authenticated = true
-	client.Token = token
-	client.ClientType = clientType
+	// use the function method to update several fields ofthe client struct  at once in a thread-safe way
+	client.updateClient(
+		func(c *Client) {
+			c.authenticated = true
+			c.token = token
+			c.clientType = clientType
+			c.id = clientID // ensure client ID is set (either from session restore or new)
+		},
+	)
+
+	// register client with the hub after successful authentication
+	hub.registerClient(client)
 
 	response := Message{
-		Type:      "auth_response",
-		ClientID:  client.ID,
+		Type:      MessageTypeAuthResponse,
+		ClientID:  client.getID(),
 		Timestamp: getCurrentTimestamp(),
 		Payload: map[string]interface{}{
 			"success": true,
 		},
 	}
 
-	client.Conn.WriteJSON(response)
+	hub.sendMessageToClient(client, response)
 }
 
 func handleChatMessage(hub *Hub, client *Client, msg Message) {
 	// Add clientId and formatted timestamp
-	msg.ClientID = client.ID
+	msg.ClientID = client.getID()
 	msg.Timestamp = getCurrentTimestamp()
 
 	// Ensure recipientId defaults to "all"
@@ -188,8 +205,18 @@ func handleChatMessage(hub *Hub, client *Client, msg Message) {
 		msg.Payload["recipientId"] = "all"
 	}
 
-	hub.Broadcast <- msg
+	hub.broadcastChatMessage(msg)
 }
+
+/* // sendMessage sends a message to the specified client
+// send channel has queue buffer - if it is full, we can just drop the message and close the connection to avoid blocking the hub
+func (c *Client) sendMessage(msg Message) {
+	select {
+	case c.Send <- msg:
+	default:
+		close(c.Send)
+	}
+} */
 
 // startHeartbeat sends heartbeat messages to all clients every 10 seconds
 func startHeartbeat(hub *Hub) {
@@ -197,28 +224,18 @@ func startHeartbeat(hub *Hub) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Build current client list
-		clientList := make([]string, 0, len(hub.Clients))
-		for client := range hub.Clients {
-			clientList = append(clientList, client.ID)
-		}
-
 		heartbeatMsg := Message{
-			Type:      "heartbeat",
+			Type:      MessageTypeHeartbeat,
 			Timestamp: getCurrentTimestamp(),
-			Payload: map[string]interface{}{
-				"userCount":  len(hub.Clients),
-				"clientList": clientList,
-			},
 		}
 
-		hub.Broadcast <- heartbeatMsg
+		hub.broadcastToAll(heartbeatMsg)
 	}
 }
 
 func main() {
 	hub := NewHub()
-	go hub.Run()
+	//go hub.Run()
 	go startHeartbeat(hub)
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

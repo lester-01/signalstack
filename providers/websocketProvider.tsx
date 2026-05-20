@@ -127,13 +127,18 @@ export function WebSocketProvider({
     socket.onmessage = (event) => {
       const data: Message = JSON.parse(event.data);
 
+      // 0. HEARTBEAT HANDLING (NEW)
+      if (data.type === MessageTypeEnum.HEARTBEAT) {
+        // For now, we dont do anything on heartbeat, but we could update a last-seen timestamp or user count if we wanted
+        return; // don't treat as chat message
+      }
+
       // -------------------------
       // 1. CLIENT LIST UPDATES
       // -------------------------
       if (
         data.type === MessageTypeEnum.JOIN ||
-        data.type === MessageTypeEnum.LEAVE ||
-        data.type === MessageTypeEnum.HEARTBEAT
+        data.type === MessageTypeEnum.LEAVE
       ) {
         if (data.payload?.clientList) {
           setStore((prev) => ({ ...prev, connectedClients: data.payload?.clientList ?? [] }));

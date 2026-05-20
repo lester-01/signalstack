@@ -1,117 +1,164 @@
 package main
 
+import "sync"
+
 // Hub maintains active client connections and routes messages
 type Hub struct {
-	Clients    map[*Client]bool
-	Broadcast  chan Message
-	Register   chan *Client
-	Unregister chan *Client
+	mu      sync.RWMutex
+	clients map[*Client]bool
+	// broadcast  chan Message
+	// register   chan *Client
+	// unregister chan *Client
 }
 
 // NewHub creates and returns a new Hub instance
 func NewHub() *Hub {
 	return &Hub{
-		Clients:    make(map[*Client]bool),
-		Broadcast:  make(chan Message),
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
+		clients: make(map[*Client]bool),
+		// broadcast:  make(chan Message),
+		// register:   make(chan *Client),
+		// unregister: make(chan *Client),
 	}
 }
 
-// Run starts the hub's main loop handling client registration and message routing
-func (h *Hub) Run() {
-	for {
-		select {
-		case client := <-h.Register:
-			h.Clients[client] = true
+// getAllClientIDs returns a slice of client IDs for all connected clients
+func (h *Hub) getAllClientIDs() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
-			// Build client list
-			clientList := make([]string, 0, len(h.Clients))
-			for c := range h.Clients {
-				clientList = append(clientList, c.ID)
-			}
+	clientIDs := make([]string, 0, len(h.clients))
+	for client := range h.clients {
+		clientIDs = append(clientIDs, client.getID())
+	}
+	return clientIDs
+}
 
-			// Broadcast join message with client list and user count
-			joinMsg := Message{
-				Type:      "join",
-				ClientID:  client.ID,
-				Timestamp: getCurrentTimestamp(),
-				Payload: map[string]interface{}{
-					"userCount":  len(h.Clients),
-					"clientList": clientList,
-				},
-			}
-			// Send join to all clients (including the new one)
-			for c := range h.Clients {
-				select {
-				case c.Send <- joinMsg:
-				default:
-					close(c.Send)
-					delete(h.Clients, c)
-				}
-			}
+/* // getAllClientInfo returns a slice of ClientInfo for all connected clients
+func (h *Hub) getAllClientInfo() []ClientInfo {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
-		case client := <-h.Unregister:
-			if _, ok := h.Clients[client]; ok {
-				delete(h.Clients, client)
-				close(client.Send)
+	clientInfoList := make([]ClientInfo, 0, len(h.Clients))
+	for client := range h.Clients {
+		clientInfoList = append(clientInfoList, client.getClientInfo())
+	}
+	return clientInfoList
+} */
 
-				// Build updated client list
-				clientList := make([]string, 0, len(h.Clients))
-				for c := range h.Clients {
-					clientList = append(clientList, c.ID)
-				}
+// returns copy of all clients - used for iterating over clients without holding lock
+func (h *Hub) getClientsSnapshot() []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
-				// Broadcast leave message with updated client list
-				leaveMsg := Message{
-					Type:      "leave",
-					ClientID:  client.ID,
-					Timestamp: getCurrentTimestamp(),
-					Payload: map[string]interface{}{
-						"userCount":  len(h.Clients),
-						"clientList": clientList,
-					},
-				}
-				// Send leave to all remaining clients
-				for c := range h.Clients {
-					select {
-					case c.Send <- leaveMsg:
-					default:
-						close(c.Send)
-						delete(h.Clients, c)
-					}
-				}
-			}
+	clients := make([]*Client, 0, len(h.clients))
+	for c := range h.clients {
+		clients = append(clients, c)
+	}
+	return clients
+}
 
-		case msg := <-h.Broadcast:
-			// Check for recipient ID in payload
-			recipientID, hasRecipient := msg.Payload["recipientId"].(string)
-			isPrivate := hasRecipient && recipientID != "all"
+func (h *Hub) registerClient(client *Client) {
+	h.mu.Lock()
+	h.clients[client] = true
+	h.mu.Unlock()
+	h.broadcastJoin(client)
+}
 
-			if isPrivate {
-				// Private message: send to recipient + sender only
-				senderID := msg.ClientID
-				for client := range h.Clients {
-					if client.ID == recipientID || client.ID == senderID {
-						select {
-						case client.Send <- msg:
-						default:
-							close(client.Send)
-							delete(h.Clients, client)
-						}
-					}
-				}
-			} else {
-				// Broadcast message: send to all clients
-				for client := range h.Clients {
-					select {
-					case client.Send <- msg:
-					default:
-						close(client.Send)
-						delete(h.Clients, client)
-					}
-				}
-			}
+func (h *Hub) unregisterClient(client *Client) {
+	h.mu.Lock()
+	_, ok := h.clients[client]
+	if ok {
+		delete(h.clients, client)
+	}
+	h.mu.Unlock()
+
+	if ok {
+		client.disconnect()
+		h.broadcastLeave(client)
+	}
+}
+
+func (h *Hub) broadcastChatMessage(msg Message) {
+	// Check for recipient ID in payload
+	recipientID, hasRecipient := msg.Payload["recipientId"].(string)
+	isPrivate := hasRecipient && recipientID != "all"
+
+	if isPrivate {
+		h.sendMessageToRecipient(msg, recipientID)
+	} else {
+		h.broadcastToAll(msg)
+	}
+}
+
+func (h *Hub) sendMessageToClient(client *Client, msg Message) {
+	// keep using channels for sending, so we can use the buffer as a queue
+	select {
+	case client.send <- msg:
+	default:
+		h.unregisterClient(client)
+	}
+}
+
+func (h *Hub) sendMessageToRecipient(msg Message, recipientID string) {
+	senderID := msg.ClientID
+	clientsSnapshot := h.getClientsSnapshot()
+	for _, tmpClient := range clientsSnapshot {
+		if tmpClient.id == recipientID || tmpClient.id == senderID {
+			h.sendMessageToClient(tmpClient, msg)
 		}
 	}
 }
+
+func (h *Hub) broadcastToAll(msg Message) {
+	clientsSnapshot := h.getClientsSnapshot()
+	for _, client := range clientsSnapshot {
+		h.sendMessageToClient(client, msg)
+	}
+}
+
+func (h *Hub) broadcastJoin(client *Client) {
+	clientIDs := h.getAllClientIDs()
+
+	// Broadcast join message with client list and user count
+	joinMsg := Message{
+		Type:      "join",
+		ClientID:  client.getID(),
+		Timestamp: getCurrentTimestamp(),
+		Payload: map[string]interface{}{
+			"userCount":  len(clientIDs),
+			"clientList": clientIDs,
+		},
+	}
+	h.broadcastToAll(joinMsg)
+}
+
+func (h *Hub) broadcastLeave(client *Client) {
+	clientIDs := h.getAllClientIDs()
+
+	// Broadcast leave message with updated client list
+	leaveMsg := Message{
+		Type:      "leave",
+		ClientID:  client.getID(),
+		Timestamp: getCurrentTimestamp(),
+		Payload: map[string]interface{}{
+			"userCount":  len(clientIDs),
+			"clientList": clientIDs,
+		},
+	}
+	h.broadcastToAll(leaveMsg)
+}
+
+/* func handleAuthMessage(h *Hub, client *Client, msg Message) {
+	// For demo purposes, we'll just mark the client as authenticated without checking credentials
+	client.setAuthenticated(true)
+
+	response := Message{
+		Type:      MessageTypeAuthResponse,
+		ClientID:  client.getID(),
+		Timestamp: getCurrentTimestamp(),
+		Payload: map[string]interface{}{
+			"success": true,
+		},
+	}
+	h.sendMessageToClient(client, response)
+} */
