@@ -124,15 +124,11 @@ If you're building real-time systems (trading platforms, collaborative tools, li
 <details>
 <summary>Click to view UI screenshots</summary>
 
-![Screenshot 1](demo/Screenshot%202026-05-20%20204258.png)
-![Screenshot 2](demo/Screenshot%202026-05-20%20204328.png)
-![Screenshot 3](demo/Screenshot%202026-05-20%20204350.png)
-![Screenshot 4](demo/Screenshot%202026-05-20%20204448.png)
-![Screenshot 5](demo/Screenshot%202026-05-20%20204630.png)
-![Screenshot 6](demo/Screenshot%202026-05-20%20204650.png)
-![Screenshot 7](demo/Screenshot%202026-05-20%20204728.png)
-![Screenshot 8](demo/Screenshot%202026-05-20%20204855.png)
-![Screenshot 9](demo/Screenshot%202026-05-20%20204911.png)
+![Screenshot 1](demo/Screenshot%202026-05-20%20204448.png)
+![Screenshot 2](demo/Screenshot%202026-05-20%20204650.png)
+![Screenshot 3](demo/Screenshot%202026-05-20%20204728.png)
+![Screenshot 4](demo/Screenshot%202026-05-20%20204855.png)
+![Screenshot 5](demo/Screenshot%202026-05-20%20204911.png)
 
 </details>
 
