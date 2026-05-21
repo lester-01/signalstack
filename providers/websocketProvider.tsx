@@ -115,7 +115,8 @@ export function WebSocketProvider({
       const authPayload = {
         type: MessageTypeEnum.AUTH,
         payload: {
-          token: localStorage.getItem("token") || "secret-token", // Replace with real token retrieval
+          //token: localStorage.getItem("token") || "secret-token", // Replace with real token retrieval
+          token: sessionStorage.getItem("token") || "secret-token", // Replace with real token retrieval
           clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
           clientId: storeRef.current.clientId || undefined,
         },
@@ -150,7 +151,8 @@ export function WebSocketProvider({
       // -------------------------
       if (!storeRef.current.clientId && data.clientId) {
         setStore((prev) => ({ ...prev, clientId: data.clientId ?? "" }));
-        localStorage.setItem("websocket-clientid", data.clientId);
+        //localStorage.setItem("websocket-clientid", data.clientId);
+        sessionStorage.setItem("websocket-clientid", data.clientId);
       }
 
       // -------------------------
@@ -237,7 +239,8 @@ export function WebSocketProvider({
   // INIT / CLEANUP
   // -----------------------
   useEffect(() => {
-    const stored = localStorage.getItem("websocket-clientid");
+    //const stored = localStorage.getItem("websocket-clientid");
+    const stored = sessionStorage.getItem("websocket-clientid");
     if (stored) setStore((prev) => ({ ...prev, clientId: stored }));
 
     connect();
