@@ -182,7 +182,7 @@ On network failure:
 
 ---
 
-## 📦 Technical Stack
+## Technical Stack
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
@@ -195,7 +195,7 @@ On network failure:
 
 ---
 
-## 🔌 Message Protocol & API
+## Message Protocol & API
 
 ### Client → Server
 
@@ -333,7 +333,7 @@ If you're building real-time systems (trading platforms, collaborative tools, li
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 <details>
 <summary>Click to view UI screenshots</summary>
