@@ -34,3 +34,8 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# and other files
+docs/PLAN.md
+docs/IMPLEMENTATION_PLAN.md
+docs/TEST_CHECKLIST.md
