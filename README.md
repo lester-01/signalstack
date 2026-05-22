@@ -1,7 +1,3 @@
-
-
-
-
 # signalstack
 
 > A real-time chat platform showcasing production-grade WebSocket infrastructure patterns in Go
@@ -10,20 +6,42 @@ A full-stack demonstration of concurrent connection handling, graceful shutdown,
 
 ---
 
+## What You're Looking At
+
+This isn't a polished chat app showcase. It's a **systems engineering playground**.
+
+Every line of code solves a real problem:
+- **Hub-Client routing** → How do you deliver a message to 1000 concurrent clients without blocking?
+- **Dual goroutines per connection** → Why can't a single goroutine safely read & write a WebSocket?
+- **Graceful shutdown + context cancellation** → How do you clean up 1000 goroutines without dangling resources?
+- **Exponential backoff reconnection** → How do you handle network failures without overwhelming the server?
+- **Message routing logic** → How do you enforce that private messages only reach 2 clients?
+
+**Curious?** → [See the full architecture breakdown](ARCHITECTURE.md)
+
+---
+
 ## See It In Action
 
 **Video Demo** (2 min walkthrough):  
-<!-- ![](./demo/demo.mp4)
-<video src="./demo/demo.mp4" controls controlsList="nodownload" preload></video> -->
-
 https://github.com/user-attachments/assets/50e5e3b0-4b67-4a30-9a39-53ccbbd41937
 
-<!-- <video autoplay muted loop playsinline controls width="100%">
-  <source src="./demo/demo.mp4" type="video/mp4">
-</video> -->
 Open multiple browser tabs to see real-time sync. Send public messages (everyone sees), private messages (1-to-1 only), watch users connect/disconnect, and trigger auto-reconnect by killing your network. It just works.
 
 ---
+
+## Screenshots
+
+<details>
+<summary>Click to view UI screenshots</summary>
+
+![Screenshot 1](demo/Screenshot%202026-05-20%20204448.png)
+![Screenshot 2](demo/Screenshot%202026-05-20%20204650.png)
+![Screenshot 3](demo/Screenshot%202026-05-20%20204728.png)
+![Screenshot 4](demo/Screenshot%202026-05-20%20204855.png)
+![Screenshot 5](demo/Screenshot%202026-05-20%20204911.png)
+
+</details>
 
 ## Quick Start
 
@@ -43,21 +61,6 @@ npm install && npm run dev
 ```
 
 Open http://localhost:3000 in multiple tabs. That's it.
-
----
-
-## What You're Looking At
-
-This isn't a polished chat app showcase. It's a **systems engineering playground**.
-
-Every line of code solves a real problem:
-- **Hub-Client routing** → How do you deliver a message to 1000 concurrent clients without blocking?
-- **Dual goroutines per connection** → Why can't a single goroutine safely read & write a WebSocket?
-- **Graceful shutdown + context cancellation** → How do you clean up 1000 goroutines without dangling resources?
-- **Exponential backoff reconnection** → How do you handle network failures without overwhelming the server?
-- **Message routing logic** → How do you enforce that private messages only reach 2 clients?
-
-**Curious?** → [See the full architecture breakdown](ARCHITECTURE.md)
 
 ---
 
@@ -125,23 +128,4 @@ If you're building real-time systems (trading platforms, collaborative tools, li
 
 ---
 
-**Questions?** Open an [issue on GitHub](https://github.com/lester-01/signalstack) or explore [ARCHITECTURE.md](ARCHITECTURE.md) for deep dives.
-
----
-
-## Screenshots
-
-<details>
-<summary>Click to view UI screenshots</summary>
-
-![Screenshot 1](demo/Screenshot%202026-05-20%20204448.png)
-![Screenshot 2](demo/Screenshot%202026-05-20%20204650.png)
-![Screenshot 3](demo/Screenshot%202026-05-20%20204728.png)
-![Screenshot 4](demo/Screenshot%202026-05-20%20204855.png)
-![Screenshot 5](demo/Screenshot%202026-05-20%20204911.png)
-
-</details>
-
----
-
-Happy coding!
+**Questions?** Open an [issue on GitHub](https://github.com/lester-01/signalstack)
