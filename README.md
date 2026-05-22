@@ -1,3 +1,7 @@
+
+
+
+
 # signalstack
 
 > A real-time chat platform showcasing production-grade WebSocket infrastructure patterns in Go
@@ -12,7 +16,7 @@ A full-stack demonstration of concurrent connection handling, graceful shutdown,
 <!-- ![](./demo/demo.mp4)
 <video src="./demo/demo.mp4" controls controlsList="nodownload" preload></video> -->
 
-https://github.com/lester-01/signalstack/blob/main/demo/demo.mp4
+https://github.com/user-attachments/assets/50e5e3b0-4b67-4a30-9a39-53ccbbd41937
 
 <!-- <video autoplay muted loop playsinline controls width="100%">
   <source src="./demo/demo.mp4" type="video/mp4">
