@@ -9,8 +9,12 @@ A full-stack demonstration of concurrent connection handling, graceful shutdown,
 ## See It In Action
 
 **Video Demo** (2 min walkthrough):  
-![signalstack demo](demo/websocket%20chat%20app%20demo.mp4)
+<!-- ![](./demo/demo.mp4)
+<video src="./demo/demo.mp4" controls controlsList="nodownload" preload></video> -->
 
+<video autoplay muted loop playsinline controls width="100%">
+  <source src="./demo/demo.mp4" type="video/mp4">
+</video>
 Open multiple browser tabs to see real-time sync. Send public messages (everyone sees), private messages (1-to-1 only), watch users connect/disconnect, and trigger auto-reconnect by killing your network. It just works.
 
 ---
