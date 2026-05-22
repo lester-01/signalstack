@@ -23,7 +23,7 @@ Every line of code solves a real problem:
 
 ## See It In Action
 
-**Video Demo** (2 min walkthrough): 
+**Video Demo** (2 min walkthrough):   
 https://github.com/user-attachments/assets/f102ed96-9df4-4a40-8cb3-fa7ed6bd5c59
 
 Open multiple browser tabs to see real-time sync. Send public messages (everyone sees), private messages (1-to-1 only), watch users connect/disconnect, and trigger auto-reconnect by killing your network. It just works.
