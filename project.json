@@ -1,11 +1,23 @@
 {
   "schema_version": 1,
-  "status": "idea",
-  "tags": [],
+  "status": "live",
+  "tags": [
+    "go",
+    "websocket",
+    "nextjs",
+    "realtime"
+  ],
+  "languages": [
+    "TypeScript",
+    "Go",
+    "CSS",
+    "JavaScript"
+  ],
   "public": {
     "listed": true,
     "featured": true,
     "rank": 2000,
     "website": null
-  }
+  },
+  "reviewed_at": "2026-11-03"
 }
