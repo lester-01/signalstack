@@ -82,6 +82,7 @@ JSON text frames: `{ "type", "clientId"?, "timestamp", "payload"? }`.
 - **Session restore:** the ID and resume token are kept in `sessionStorage` and sent on every connect; the ID shown is always the one the server confirms in `auth_response`.
 - **Stale sockets:** each handler ignores events from a socket that is no longer current, which keeps React remounts from triggering duplicate reconnects.
 - **Config:** `NEXT_PUBLIC_WS_URL` and `NEXT_PUBLIC_AUTH_TOKEN`.
+- **UI:** `app/page.tsx` composes the components in `components/chat/`. Each client ID is hashed to a fixed color (`lib/identity.ts`), so the same client looks the same in the presence list and the message log. Selecting someone in the list switches the composer to a private message, and falls back to everyone if that person goes offline.
 
 ## Testing
 

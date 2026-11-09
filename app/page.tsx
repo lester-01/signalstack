@@ -1,195 +1,84 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useChat } from "@/providers/websocketProvider";
-import { formatMessageDisplay, getClientLabel } from "@/lib/messages";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState } from "react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { WebSocketStateEnum } from "@/providers/websocketProvider";
+  useChat,
+  WebSocketStateEnum,
+} from "@/providers/websocketProvider";
+import { Avatar } from "@/components/chat/avatar";
+import { Composer } from "@/components/chat/composer";
+import { ConnectionStatus } from "@/components/chat/connection-status";
+import { MessageLog } from "@/components/chat/message-log";
+import { shortId } from "@/lib/identity";
+import { PresenceList } from "@/components/chat/presence-list";
 
 export default function Page() {
-  const { status: websocketStatus, authState, messages, clientId, connectedClients, sendMessage } = useChat();
+  const { status, authState, messages, clientId, connectedClients, sendMessage } =
+    useChat();
+  const [picked, setPicked] = useState("all");
 
-  const [input, setInput] = useState("");
-  const [selectedRecipient, setSelectedRecipient] = useState("all");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom when new message arrives
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = () => {
-    const trimmedInput = input.trim();
-    if (trimmedInput && websocketStatus === WebSocketStateEnum.OPEN) {
-      sendMessage(trimmedInput, selectedRecipient);
-      setInput("");
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+  // If the person we were messaging goes offline, fall back to everyone.
+  const recipient =
+    picked === "all" || connectedClients.includes(picked) ? picked : "all";
+  const ready =
+    status === WebSocketStateEnum.OPEN && authState === "authenticated";
+  const targetLabel = recipient === "all" ? "everyone" : recipient;
 
   return (
-    <div className="flex h-screen flex-col gap-4 bg-slate-950 p-4">
-      {/* Header */}
-      <Card className="border-slate-800 bg-slate-900">
-        <CardHeader>
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-2xl">WebSocket Chat</CardTitle>
-              <div className="text-sm text-slate-400">
-                <span className="font-medium">Your ID:</span> <span className="text-slate-300">{clientId || "..."}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-400">Connection:</span>
-                <Badge
-                  variant={
-                    websocketStatus === WebSocketStateEnum.OPEN
-                      ? "default"
-                      : websocketStatus === WebSocketStateEnum.CLOSED
-                        ? "destructive"
-                        : "secondary"
-                  }
-                >
-                  {websocketStatus}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-400">Auth:</span>
-                <Badge
-                  variant={
-                    authState === "authenticated"
-                      ? "default"
-                      : authState === "unauthenticated"
-                        ? "destructive"
-                        : "secondary"
-                  }
-                >
-                  {authState}
-                </Badge>
-              </div>
-            </div>
-            <div className="text-sm text-slate-400">
-              <span className="font-medium">{connectedClients.length} users online</span>
-            </div>
+    <div className="flex h-dvh flex-col md:flex-row">
+      <aside className="flex max-h-[38dvh] shrink-0 flex-col border-b border-line bg-panel md:max-h-none md:w-72 md:border-r md:border-b-0">
+        <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 md:pt-5 md:pb-4">
+          <h1 className="text-base font-semibold tracking-tight">SignalStack</h1>
+          <ConnectionStatus status={status} authState={authState} />
+        </header>
+
+        <div className="mx-5 mb-4 hidden items-center gap-3 rounded-xl md:flex border border-line bg-paper px-3 py-2.5">
+          {clientId ? <Avatar id={clientId} /> : <span className="size-8 rounded-full bg-hover" />}
+          <div className="min-w-0 leading-tight">
+            <p className="text-xs text-muted">You are</p>
+            <p className="truncate font-mono text-[13px]">{clientId || "…"}</p>
           </div>
-        </CardHeader>
-      </Card>
+        </div>
 
-      {/* Error Display */}
-      {/* {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-6">
-            <p className="text-sm text-red-700">⚠️ {error}</p>
-          </CardContent>
-        </Card>
-      )} */}
+        <PresenceList
+          clients={connectedClients}
+          selfId={clientId}
+          recipient={recipient}
+          onSelect={setPicked}
+        />
+      </aside>
 
-      {/* Recipient Selector */}
-      <Card className="border-slate-800 bg-slate-900">
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-slate-300">Send to:</label>
-            <Select value={selectedRecipient} onValueChange={setSelectedRecipient}>
-              <SelectTrigger className="w-64 border-slate-700 bg-slate-800 text-slate-200">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="border-slate-700 bg-slate-900">
-                <SelectItem value="all">Everyone</SelectItem>
-                {connectedClients
-                  .filter((id) => id !== clientId)
-                  .map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {getClientLabel(id, clientId)}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Messages Display */}
-      <Card className="flex flex-1 flex-col overflow-hidden border-slate-800 bg-slate-900">
-        <CardHeader>
-          <CardTitle className="text-base text-slate-200">Message History</CardTitle>
-        </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-0">
-          <ScrollArea className="h-full w-full">
-            <div className="flex flex-col gap-2 p-4">
-              {messages.length === 0 ? (
-                <p className="text-sm text-slate-500">No messages yet...</p>
-              ) : (
-                messages.map((msg, idx) => {
-                  const displayText = formatMessageDisplay(msg, clientId);
-                  const isPartOfPrivate =
-                    !!msg.payload?.recipientId &&
-                    msg.payload.recipientId !== "all" &&
-                    (msg.clientId === clientId ||
-                      msg.payload.recipientId === clientId);
-
-                  return (
-                    <div key={idx}>
-                      <div
-                        className={`text-xs font-mono leading-relaxed ${
-                          isPartOfPrivate
-                            ? "italic text-purple-400"
-                            : "text-slate-300"
-                        }`}
-                      >
-                        <span className="text-slate-500">[{msg.timestamp}]</span>{" "}
-                        {displayText}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
-
-      {/* Input Section */}
-      <Card className="border-slate-800 bg-slate-900">
-        <CardContent className="pt-6">
-          <div className="flex gap-2">
-            <Input
-              type="text"
-              placeholder="Type a message..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              disabled={websocketStatus !== WebSocketStateEnum.OPEN}
-              className="flex-1 border-slate-700 bg-slate-800 text-slate-200 placeholder-slate-500"
-            />
-            <Button
-              onClick={handleSend}
-              disabled={!input.trim() || websocketStatus !== WebSocketStateEnum.OPEN}
+      <main className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-6">
+          <h2 className="text-sm font-medium">
+            {recipient === "all" ? (
+              "Everyone"
+            ) : (
+              <>
+                Private with{" "}
+                <span title={recipient} className="font-mono text-private">{shortId(recipient)}</span>
+              </>
+            )}
+          </h2>
+          {recipient !== "all" && (
+            <button
+              type="button"
+              onClick={() => setPicked("all")}
+              className="rounded-md px-2 py-1 text-xs text-muted hover:bg-hover focus-visible:outline-2 focus-visible:outline-signal"
             >
-              Send
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+              Back to everyone
+            </button>
+          )}
+        </div>
+
+        <MessageLog messages={messages} selfId={clientId} />
+
+        <Composer
+          disabled={!ready}
+          target={targetLabel}
+          onSend={(text) => sendMessage(text, recipient)}
+        />
+      </main>
     </div>
   );
 }
-

@@ -71,11 +71,11 @@ The suite covers auth rejection delivery, ID spoofing and resume, presence batch
 backend/    Go server (hub, client, server, config, session, metrics, rate limit) and tests
 backend/cmd/loadtest/  Load generator and latency histogram
 docs/       Benchmarking guide
-scripts/    Benchmark sweep script
+scripts/    Benchmark sweep (bench-sweep.sh) and demo capture (capture.mjs)
 app/        Next.js pages
 providers/  WebSocket provider and useChat() hook
-components/ui/  shadcn/ui primitives
-lib/        Message formatting helpers
+components/chat/  Chat UI: presence list, message log, composer, connection status
+lib/        Client ID colors and helpers
 demo/       Screenshots and walkthrough video
 ```
 
