@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WebSocketStateEnum } from "@/providers/websocketProvider";
-import { MessageTypeEnum } from "@/providers/websocketProvider";
 
 export default function Page() {
   const { status: websocketStatus, authState, messages, clientId, connectedClients, sendMessage } = useChat();
@@ -140,27 +139,20 @@ export default function Page() {
               ) : (
                 messages.map((msg, idx) => {
                   const displayText = formatMessageDisplay(msg, clientId);
-                  const isPrivate =
-                    msg.payload?.recipientId &&
-                    msg.payload.recipientId !== "all";
                   const isPartOfPrivate =
-                    isPrivate &&
+                    !!msg.payload?.recipientId &&
+                    msg.payload.recipientId !== "all" &&
                     (msg.clientId === clientId ||
-                      msg.payload?.recipientId === clientId);
+                      msg.payload.recipientId === clientId);
 
                   return (
                     <div key={idx}>
                       <div
-                        className={`text-xs font-mono leading-relaxed ${msg.type === MessageTypeEnum.HEARTBEAT
-                            ? "text-slate-600"
-                            : msg.type === MessageTypeEnum.JOIN
-                              ? "text-green-400"
-                              : msg.type === MessageTypeEnum.LEAVE
-                                ? "text-orange-400"
-                                : isPartOfPrivate
-                                  ? "italic text-purple-400"
-                                  : "text-slate-300"
-                          }`}
+                        className={`text-xs font-mono leading-relaxed ${
+                          isPartOfPrivate
+                            ? "italic text-purple-400"
+                            : "text-slate-300"
+                        }`}
                       >
                         <span className="text-slate-500">[{msg.timestamp}]</span>{" "}
                         {displayText}
