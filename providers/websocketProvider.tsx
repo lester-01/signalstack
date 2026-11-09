@@ -8,6 +8,27 @@ import {
   useState,
 } from "react";
 
+// Configuration comes from the environment (see .env.example). The WebSocket
+// URL falls back to the local dev backend; the auth token has no fallback.
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws";
+
+const STORAGE_KEYS = {
+  authToken: "token", // optional override, e.g. set by a future login screen
+  clientId: "websocket-clientid",
+  resumeToken: "websocket-resume-token",
+} as const;
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 10000;
+
+function getAuthToken(): string {
+  return (
+    sessionStorage.getItem(STORAGE_KEYS.authToken) ??
+    process.env.NEXT_PUBLIC_AUTH_TOKEN ??
+    ""
+  );
+}
+
 export const CLIENT_TYPE = {
   BROWSER: "browser",
   ANDROID: "android_client",
@@ -37,7 +58,9 @@ export type Message = {
     recipientId?: string;
     userCount?: number;
     clientList?: string[];
-    success?: boolean; // For auth response
+    success?: boolean; // auth_response
+    reason?: string; // auth_response failure reason
+    resumeToken?: string; // auth_response success: lets this client reclaim its ID
   };
 };
 
@@ -94,7 +117,7 @@ export function WebSocketProvider({
   // -----------------------
   const ws = useRef<WebSocket | null>(null);
   const retryCount = useRef(0);
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manuallyClosed = useRef(false);
   const storeRef = useRef(store);
 
@@ -102,100 +125,127 @@ export function WebSocketProvider({
   // CONNECT LOGIC
   // -----------------------
   const connect = () => {
-    setStore((prev) => ({ ...prev, status: retryCount.current > 0 ? WebSocketStateEnum.RECONNECTING : WebSocketStateEnum.CONNECTING }));
+    setStore((prev) => ({
+      ...prev,
+      status:
+        retryCount.current > 0
+          ? WebSocketStateEnum.RECONNECTING
+          : WebSocketStateEnum.CONNECTING,
+    }));
 
-    const socket = new WebSocket("ws://localhost:8080/ws");
+    const socket = new WebSocket(WS_URL);
     ws.current = socket;
 
+    // Handlers ignore events from a socket that is no longer the current one
+    // (e.g. a socket closed by a React remount), so it cannot trigger a
+    // reconnect or overwrite state.
     socket.onopen = () => {
-      setStore((prev) => ({ ...prev, status: "open" }));
-      retryCount.current = 0;
+      if (ws.current !== socket) return;
 
-      //
-      const authPayload = {
-        type: MessageTypeEnum.AUTH,
-        payload: {
-          //token: localStorage.getItem("token") || "secret-token", // Replace with real token retrieval
-          token: sessionStorage.getItem("token") || "secret-token", // Replace with real token retrieval
-          clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
-          clientId: storeRef.current.clientId || undefined,
-        },
-      };
-      setStore((prev) => ({ ...prev, authState: AuthStateEnum.AUTHENTICATING }));
-      ws.current?.send(JSON.stringify(authPayload));
+      setStore((prev) => ({
+        ...prev,
+        status: WebSocketStateEnum.OPEN,
+        authState: AuthStateEnum.AUTHENTICATING,
+      }));
+
+      // clientId + resumeToken let the server restore this client's identity.
+      // The server ignores them unless the token is valid.
+      socket.send(
+        JSON.stringify({
+          type: MessageTypeEnum.AUTH,
+          payload: {
+            token: getAuthToken(),
+            clientType: storeRef.current.clientType ?? CLIENT_TYPE.BROWSER,
+            clientId: sessionStorage.getItem(STORAGE_KEYS.clientId) ?? undefined,
+            resumeToken:
+              sessionStorage.getItem(STORAGE_KEYS.resumeToken) ?? undefined,
+          },
+        })
+      );
     };
 
     socket.onmessage = (event) => {
-      const data: Message = JSON.parse(event.data);
+      if (ws.current !== socket) return;
 
-      // 0. HEARTBEAT HANDLING (NEW)
-      if (data.type === MessageTypeEnum.HEARTBEAT) {
-        // For now, we dont do anything on heartbeat, but we could update a last-seen timestamp or user count if we wanted
-        return; // don't treat as chat message
+      let data: Message;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return; // ignore malformed frames
       }
 
-      // -------------------------
-      // 1. CLIENT LIST UPDATES
-      // -------------------------
-      if (
-        data.type === MessageTypeEnum.JOIN ||
-        data.type === MessageTypeEnum.LEAVE
-      ) {
-        if (data.payload?.clientList) {
-          setStore((prev) => ({ ...prev, connectedClients: data.payload?.clientList ?? [] }));
+      switch (data.type) {
+        case MessageTypeEnum.HEARTBEAT:
+          return;
+
+        case MessageTypeEnum.AUTH_RESPONSE: {
+          const ok = data.payload?.success === true;
+
+          if (ok && data.clientId) {
+            // The server is the source of truth for our ID. It may differ from
+            // the one we sent if the resume token was missing or invalid.
+            sessionStorage.setItem(STORAGE_KEYS.clientId, data.clientId);
+            if (data.payload?.resumeToken) {
+              sessionStorage.setItem(
+                STORAGE_KEYS.resumeToken,
+                data.payload.resumeToken
+              );
+            }
+            retryCount.current = 0;
+          }
+
+          setStore((prev) => ({
+            ...prev,
+            clientId: ok && data.clientId ? data.clientId : prev.clientId,
+            status: ok ? WebSocketStateEnum.OPEN : WebSocketStateEnum.CLOSED,
+            authState: ok
+              ? AuthStateEnum.AUTHENTICATED
+              : AuthStateEnum.UNAUTHENTICATED,
+          }));
+
+          // Don't keep retrying with credentials the server rejected.
+          if (!ok) {
+            manuallyClosed.current = true;
+            socket.close();
+          }
+          return;
         }
+
+        case MessageTypeEnum.JOIN:
+        case MessageTypeEnum.LEAVE:
+          if (data.payload?.clientList) {
+            const list = data.payload.clientList;
+            setStore((prev) => ({ ...prev, connectedClients: list }));
+          }
+          return;
+
+        case MessageTypeEnum.MESSAGE:
+          setStore((prev) => ({
+            ...prev,
+            messages: [...prev.messages, data],
+          }));
+          return;
       }
-
-      // -------------------------
-      // 2. CLIENT ID INITIALIZATION
-      // -------------------------
-      if (!storeRef.current.clientId && data.clientId) {
-        setStore((prev) => ({ ...prev, clientId: data.clientId ?? "" }));
-        //localStorage.setItem("websocket-clientid", data.clientId);
-        sessionStorage.setItem("websocket-clientid", data.clientId);
-      }
-
-      // -------------------------
-      // 3. AUTH RESPONSE HANDLING (NEW)
-      // -------------------------
-      if (data.type === MessageTypeEnum.AUTH_RESPONSE) {
-        setStore((prev) => ({
-          ...prev,
-          status: data.payload?.success ? WebSocketStateEnum.OPEN : WebSocketStateEnum.CLOSED,
-          authState: data.payload?.success ? AuthStateEnum.AUTHENTICATED : AuthStateEnum.UNAUTHENTICATED,
-        }));
-
-        // if auth failed, dont keep retrying
-        if (!data.payload?.success) {
-          manuallyClosed.current = true;
-          ws.current?.close();
-        }
-
-        return; // IMPORTANT: don't treat as chat message
-      }
-
-      // -------------------------
-      // 4. CHAT MESSAGES ONLY
-      // -------------------------
-      if (data.type ===  MessageTypeEnum.MESSAGE) {
-        setStore((prev) => ({
-          ...prev,
-          messages: [...prev.messages, data],
-        }));
-      }
-
-      //setStore((prev) => ({ ...prev, messages: [...prev.messages, data] }));
     };
 
     socket.onclose = () => {
-      setStore((prev) => ({ ...prev, status: WebSocketStateEnum.CLOSED }));
+      if (ws.current !== socket) return;
+
+      setStore((prev) => ({
+        ...prev,
+        status: WebSocketStateEnum.CLOSED,
+        authState: AuthStateEnum.UNAUTHENTICATED,
+      }));
 
       if (manuallyClosed.current) return;
 
-      const delay = Math.min(
-        1000 * Math.pow(2, retryCount.current),
-        10000
+      // Exponential backoff with jitter, so many clients that lost the same
+      // server do not all reconnect at the same instant.
+      const backoff = Math.min(
+        RECONNECT_BASE_MS * 2 ** retryCount.current,
+        RECONNECT_MAX_MS
       );
+      const delay = backoff / 2 + Math.random() * (backoff / 2);
 
       retryCount.current++;
 
@@ -203,12 +253,11 @@ export function WebSocketProvider({
         clearTimeout(reconnectTimeout.current);
       }
 
-      reconnectTimeout.current = setTimeout(() => {
-        connect();
-      }, delay);
+      reconnectTimeout.current = setTimeout(connect, delay);
     };
 
     socket.onerror = () => {
+      if (ws.current !== socket) return;
       setStore((prev) => ({ ...prev, status: WebSocketStateEnum.CLOSED }));
     };
   };
@@ -239,8 +288,11 @@ export function WebSocketProvider({
   // INIT / CLEANUP
   // -----------------------
   useEffect(() => {
-    //const stored = localStorage.getItem("websocket-clientid");
-    const stored = sessionStorage.getItem("websocket-clientid");
+    // Reset on every mount: React StrictMode runs this effect, its cleanup and
+    // the effect again, and the cleanup below sets this flag.
+    manuallyClosed.current = false;
+
+    const stored = sessionStorage.getItem(STORAGE_KEYS.clientId);
     if (stored) setStore((prev) => ({ ...prev, clientId: stored }));
 
     connect();
@@ -252,17 +304,11 @@ export function WebSocketProvider({
         clearTimeout(reconnectTimeout.current);
       }
 
-      ws.current?.close();
+      const socket = ws.current;
+      ws.current = null; // marks the socket stale so its handlers do nothing
+      socket?.close();
     };
-  }, []);
-
-  // Debugging: Log when provider mounts/unmounts
-  useEffect(() => {
-    console.log("websocketProvider mounted");
-
-    return () => {
-      console.log("websocketProvider unmounted");
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // -----------------------
