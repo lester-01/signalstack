@@ -20,6 +20,7 @@ const STORAGE_KEYS = {
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 10000;
+const MAX_MESSAGES = 1000; // keep only the most recent messages in memory
 
 function getAuthToken(): string {
   return (
@@ -41,8 +42,7 @@ export type ClientType =
 export const MessageTypeEnum = {
   MESSAGE: "message",
   HEARTBEAT: "heartbeat",
-  JOIN: "join",
-  LEAVE: "leave",
+  PRESENCE: "presence",
   AUTH: "auth",
   AUTH_RESPONSE: "auth_response"
 } as const;
@@ -57,7 +57,9 @@ export type Message = {
     text?: string;
     recipientId?: string;
     userCount?: number;
-    clientList?: string[];
+    clientList?: string[]; // auth_response: everyone online, including you
+    joined?: string[]; // presence: clients that came online
+    left?: string[]; // presence: clients that went offline
     success?: boolean; // auth_response
     reason?: string; // auth_response failure reason
     resumeToken?: string; // auth_response success: lets this client reclaim its ID
@@ -194,9 +196,13 @@ export function WebSocketProvider({
             retryCount.current = 0;
           }
 
+          const list = data.payload?.clientList;
           setStore((prev) => ({
             ...prev,
             clientId: ok && data.clientId ? data.clientId : prev.clientId,
+            // The welcome message carries the full list; presence messages
+            // after it are deltas.
+            connectedClients: ok && list ? list : prev.connectedClients,
             status: ok ? WebSocketStateEnum.OPEN : WebSocketStateEnum.CLOSED,
             authState: ok
               ? AuthStateEnum.AUTHENTICATED
@@ -211,18 +217,23 @@ export function WebSocketProvider({
           return;
         }
 
-        case MessageTypeEnum.JOIN:
-        case MessageTypeEnum.LEAVE:
-          if (data.payload?.clientList) {
-            const list = data.payload.clientList;
-            setStore((prev) => ({ ...prev, connectedClients: list }));
-          }
+        case MessageTypeEnum.PRESENCE: {
+          const joined = data.payload?.joined ?? [];
+          const left = new Set(data.payload?.left ?? []);
+          setStore((prev) => {
+            const next = prev.connectedClients.filter((id) => !left.has(id));
+            for (const id of joined) {
+              if (!next.includes(id)) next.push(id);
+            }
+            return { ...prev, connectedClients: next };
+          });
           return;
+        }
 
         case MessageTypeEnum.MESSAGE:
           setStore((prev) => ({
             ...prev,
-            messages: [...prev.messages, data],
+            messages: [...prev.messages, data].slice(-MAX_MESSAGES),
           }));
           return;
       }
