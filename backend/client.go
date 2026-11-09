@@ -3,55 +3,50 @@ package main
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 
-	//"github.com/go-gost/x/ctx"
 	"github.com/gorilla/websocket"
 )
 
-// Client represents a connected WebSocket client
+const (
+	// sendBufferSize is the per-client outbound queue. A client whose queue is
+	// full is considered too slow and is disconnected rather than blocking the hub.
+	sendBufferSize = 256
+
+	writeWait      = 10 * time.Second // deadline for a single write
+	flushTimeout   = 2 * time.Second  // time allowed to flush queued messages on close
+	pongWait       = 60 * time.Second // connection is dropped if no pong/message arrives in this time
+	pingPeriod     = pongWait * 9 / 10
+	maxMessageSize = 8 * 1024 // largest inbound frame in bytes
+	maxTextRunes   = 1000     // largest chat message in characters
+)
+
+// Client is one connected WebSocket peer.
 type Client struct {
-	mu     sync.RWMutex
-	disconnectOnce sync.Once
-	ctx    context.Context
-	cancel context.CancelFunc
-	id     string
-	conn   *websocket.Conn
-	send   chan Message
-
-	authenticated bool
-	token         string
-	clientType    string
-}
-
-/* // ClientInfo returns info about a client, minus the mutex, channel and connection
-type ClientInfo struct {
+	mu            sync.RWMutex
 	id            string
 	authenticated bool
-	token         string
 	clientType    string
-} */
 
+	ctx     context.Context
+	cancel  context.CancelFunc
+	evicted atomic.Bool
+
+	conn *websocket.Conn
+	send chan Message
+}
+
+// NewClient wraps conn. The client has no ID until it authenticates.
 func NewClient(conn *websocket.Conn) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		//ID:   generateID(), //we will set the ID after authentication(create if client doesnt send one)
 		ctx:    ctx,
 		cancel: cancel,
 		conn:   conn,
-		send:   make(chan Message, 10),
+		send:   make(chan Message, sendBufferSize),
 	}
 }
-
-/* func (c *Client) getClientInfo() ClientInfo {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return ClientInfo{
-		id:            c.id,
-		authenticated: c.authenticated,
-		token:         c.token,
-		clientType:    c.clientType,
-	}
-} */
 
 func (c *Client) getID() string {
 	c.mu.RLock()
@@ -65,27 +60,54 @@ func (c *Client) isAuthenticated() bool {
 	return c.authenticated
 }
 
-/* func (c *Client) setAuthenticated(authenticated bool) {
+// authenticate marks the client as authenticated and sets its identity.
+func (c *Client) authenticate(id, clientType string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.authenticated = authenticated
-} */
-
-/* func (c *Client) closeWsConnection() {
-	c.conn.Close()
-} */
-
-// a method that takes in a function to update the client struct in a thread-safe way
-// useful for updating multiple fields at once without needing to acquire and release the lock multiple times
-func (c *Client) updateClient(updateFunc func(*Client)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	updateFunc(c)
+	c.authenticated = true
+	c.id = id
+	c.clientType = clientType
 }
 
+// trySend queues msg without blocking. It reports false if the queue is full.
+func (c *Client) trySend(msg Message) bool {
+	select {
+	case c.send <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+// disconnect asks the write loop to flush what is queued, send a close frame
+// and close the connection. It is safe to call more than once.
 func (c *Client) disconnect() {
-    c.disconnectOnce.Do(func() {
-        c.cancel()
-        c.conn.Close()
-    })
+	c.cancel()
+}
+
+// forceClose drops the connection immediately without flushing. Used for
+// clients that are not keeping up, where flushing would just block.
+func (c *Client) forceClose() {
+	c.cancel()
+	_ = c.conn.Close()
+}
+
+// flushAndClose writes any queued messages, then a normal-closure frame.
+// It must only be called from the write loop.
+func (c *Client) flushAndClose() {
+	_ = c.conn.SetWriteDeadline(time.Now().Add(flushTimeout))
+	for {
+		select {
+		case msg := <-c.send:
+			if err := c.conn.WriteJSON(msg); err != nil {
+				return
+			}
+		default:
+			_ = c.conn.WriteMessage(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			)
+			return
+		}
+	}
 }
