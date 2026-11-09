@@ -43,3 +43,6 @@ docs/TEST_CHECKLIST.md
 # go build output
 /backend/backend
 /backend/websocket-server
+
+# local benchmark output
+/backend/bench-results/

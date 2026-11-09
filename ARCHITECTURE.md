@@ -18,9 +18,11 @@ Browser (Next.js)                         Go server
 |---|---|
 | `main.go` | Load config, start the server and heartbeat, graceful shutdown on SIGINT/SIGTERM |
 | `config.go` | Environment-driven `Config` |
-| `server.go` | `/ws` and `/healthz` handlers, auth, origin check, reader and writer loops |
+| `server.go` | `/ws`, `/healthz` and `/metrics` handlers, auth, origin check, reader and writer loops |
 | `client.go` | `Client`: connection, identity, send queue, flush-and-close |
-| `hub.go` | `Hub`: registry, broadcast, private routing, eviction, presence events |
+| `hub.go` | `Hub`: registry, broadcast, private routing, eviction, batched presence |
+| `metrics.go` | Counters and the Prometheus-text `/metrics` output |
+| `ratelimit.go` | Per-client token bucket |
 | `session.go` | Client ID generation and HMAC resume tokens |
 | `types.go` | Message envelope and type constants |
 
@@ -28,9 +30,9 @@ Browser (Next.js)                         Go server
 
 1. The HTTP request is upgraded (Origin checked against `ALLOWED_ORIGINS`) and three goroutines start: **reader**, **writer** and an **auth timer**.
 2. The client must send an `auth` message within 10 seconds. Failure queues an `auth_response` with a reason, then closes.
-3. On success the server assigns an ID, queues `auth_response`, registers the client with the hub and broadcasts `join`. The response is queued first, so a client always sees it before any presence event.
+3. On success the server assigns an ID and registers the client with the hub. The `auth_response`, carrying the list of everyone online, is queued while the hub lock is held, so it is always the first message and every later presence message is a change against that list.
 4. Chat messages are validated and routed by the hub.
-5. On any exit path the client is unregistered, the writer flushes what is queued, sends a close frame and closes the socket, and `leave` is broadcast to the others.
+5. On any exit path the client is unregistered, the writer flushes what is queued, sends a close frame and closes the socket, and the departure is announced to the others in the next presence batch.
 
 ### Concurrency model
 
@@ -38,9 +40,11 @@ Browser (Next.js)                         Go server
 - **Hub state is guarded by one `sync.RWMutex`** over two maps (by pointer and by ID). Broadcasts copy the client list under the read lock and send outside it, so register/unregister never wait on a slow send.
 - **Sends never block.** If a client's queue is full it is evicted: its connection is closed immediately and it is unregistered on a separate goroutine, so a burst of evictions cannot recurse through the broadcast path.
 - **Teardown is idempotent.** `unregister` always cancels the client's context, whether or not it ever registered, so a connection that closes before authenticating does not leave goroutines behind.
+- **Presence is batched.** Changes mark a client dirty; one timer flushes after 100 ms and reports each client's actual state at that moment, so ordering of changes cannot produce a wrong list, and N clients leaving at once cost N messages instead of N².
+- **Rate limiting.** Each connection has a token bucket (`RATE_LIMIT` per second, burst twice that). Over the limit, the message is dropped and the client gets an `error`.
 - **Liveness.** The server pings every 54 seconds and drops a connection that sends neither a pong nor a message for 60 seconds. Inbound frames are capped at 8 KB and chat text at 1000 characters. The 10-second `heartbeat` message is an application-level signal for clients.
 
-Why a mutex instead of a single hub goroutine with channels? Routing here is a map lookup and a non-blocking channel send, so the critical sections are tiny and a mutex is simpler and has less overhead. A single event-loop goroutine would serialize all routing and make private-message lookups queue behind broadcasts. It would become attractive if hub logic grew (rooms, history, rate limits).
+Why a mutex instead of a single hub goroutine with channels? Routing here is a map lookup and a non-blocking channel send, so the critical sections are tiny and a mutex is simpler and has less overhead. A single event-loop goroutine would serialize all routing and make private-message lookups queue behind broadcasts. It would become attractive if hub logic grew (rooms, history).
 
 ### Auth and sessions
 
@@ -64,9 +68,10 @@ JSON text frames: `{ "type", "clientId"?, "timestamp", "payload"? }`.
 
 | type | clientId | payload |
 |---|---|---|
-| `auth_response` | your ID | `{success: true, resumeToken}` or `{success: false, reason}` where reason is `missing token`, `invalid token` or `auth timeout` |
+| `auth_response` | your ID | `{success: true, resumeToken, clientList}` or `{success: false, reason}` where reason is `missing token`, `invalid token` or `auth timeout` |
 | `message` | sender | `{text, recipientId}`; private messages go only to sender and recipient |
-| `join` / `leave` | who joined/left | `{userCount, clientList}` |
+| `presence` | – | `{joined, left, userCount}`: changes since the last batch (every 100 ms at most). Applying it is idempotent. |
+| `error` | – | `{reason}`, currently only `rate limited` |
 | `heartbeat` | – | – |
 
 ## Frontend
@@ -84,4 +89,4 @@ JSON text frames: `{ "type", "clientId"?, "timestamp", "payload"? }`.
 
 ## Not built yet
 
-Message persistence, real user auth, rooms/channels, rate limiting, horizontal scaling (for example Redis pub/sub), metrics, and published benchmarks.
+Message persistence, real user auth, rooms/channels, horizontal scaling (for example Redis pub/sub), and published benchmark results (the harness exists; see [docs/BENCHMARKING.md](docs/BENCHMARKING.md)).
