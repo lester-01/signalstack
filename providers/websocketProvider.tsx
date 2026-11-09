@@ -292,9 +292,6 @@ export function WebSocketProvider({
     // the effect again, and the cleanup below sets this flag.
     manuallyClosed.current = false;
 
-    const stored = sessionStorage.getItem(STORAGE_KEYS.clientId);
-    if (stored) setStore((prev) => ({ ...prev, clientId: stored }));
-
     connect();
 
     return () => {
