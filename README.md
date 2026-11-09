@@ -19,7 +19,7 @@ Design notes and the wire protocol: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 https://github.com/user-attachments/assets/f102ed96-9df4-4a40-8cb3-fa7ed6bd5c59
 
-Open several browser tabs to see realtime sync. More screenshots are in [`demo/`](demo/).
+Open several browser tabs to see realtime sync. To re-record the video and screenshots, see [docs/DEMO.md](docs/DEMO.md). More screenshots are in [`demo/`](demo/).
 
 ## Quick start
 
@@ -71,11 +71,11 @@ The suite covers auth rejection delivery, ID spoofing and resume, presence batch
 backend/    Go server (hub, client, server, config, session, metrics, rate limit) and tests
 backend/cmd/loadtest/  Load generator and latency histogram
 docs/       Benchmarking guide
-scripts/    Benchmark sweep script
+scripts/    Benchmark sweep (bench-sweep.sh) and demo capture (capture.mjs)
 app/        Next.js pages
 providers/  WebSocket provider and useChat() hook
-components/ui/  shadcn/ui primitives
-lib/        Message formatting helpers
+components/chat/  Chat UI: presence list, message log, composer, connection status
+lib/        Client ID colors and helpers
 demo/       Screenshots and walkthrough video
 ```
 

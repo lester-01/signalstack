@@ -46,3 +46,6 @@ docs/TEST_CHECKLIST.md
 
 # local benchmark output
 /backend/bench-results/
+
+# demo recordings
+/capture-out/
