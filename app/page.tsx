@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@/providers/websocketProvider";
-import { formatMessageDisplay, getClientLabel } from "@/lib/utils/timestamp";
+import { formatMessageDisplay, getClientLabel } from "@/lib/messages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import Link from "next/link";
 import { WebSocketStateEnum } from "@/providers/websocketProvider";
 import { MessageTypeEnum } from "@/providers/websocketProvider";
-// import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
   const { status: websocketStatus, authState, messages, clientId, connectedClients, sendMessage } = useChat();
