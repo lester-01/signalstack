@@ -39,3 +39,7 @@ next-env.d.ts
 docs/PLAN.md
 docs/IMPLEMENTATION_PLAN.md
 docs/TEST_CHECKLIST.md
+
+# go build output
+/backend/backend
+/backend/websocket-server
