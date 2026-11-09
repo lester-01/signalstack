@@ -36,7 +36,8 @@ func NewServer(cfg Config) *Server {
 	return s
 }
 
-// Handler returns the HTTP routes: /ws for WebSocket clients and /healthz for probes.
+// Handler returns the HTTP routes: /ws for WebSocket clients, /healthz for
+// probes and, when enabled, /metrics.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.serveWs)
@@ -44,7 +45,15 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	if s.cfg.MetricsEnabled {
+		mux.HandleFunc("/metrics", s.serveMetrics)
+	}
 	return mux
+}
+
+func (s *Server) serveMetrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	s.hub.metrics.write(w, s.hub.clientCount())
 }
 
 func (s *Server) checkOrigin(r *http.Request) bool {
@@ -71,12 +80,14 @@ func (s *Server) serveWs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c := NewClient(conn)
+	c.limiter = newRateLimiter(s.cfg.RateLimit)
 	go s.authTimeout(c)
 	go s.writePump(c)
 	go s.readPump(c)
 }
 
-// authTimeout disconnects clients that do not authenticate in time.
+// authTimeout disconnects clients that do not authenticate in time. It exits
+// as soon as the client authenticates or disconnects.
 func (s *Server) authTimeout(c *Client) {
 	t := time.NewTimer(authTimeout)
 	defer t.Stop()
@@ -85,6 +96,7 @@ func (s *Server) authTimeout(c *Client) {
 		if !c.isAuthenticated() {
 			s.reject(c, "auth timeout")
 		}
+	case <-c.authed:
 	case <-c.ctx.Done():
 	}
 }
@@ -92,6 +104,7 @@ func (s *Server) authTimeout(c *Client) {
 // reject tells the client why authentication failed, then closes the
 // connection. The write loop flushes the reason before closing.
 func (s *Server) reject(c *Client, reason string) {
+	s.hub.metrics.authFailures.Add(1)
 	c.trySend(Message{
 		Type:      MessageTypeAuthResponse,
 		Timestamp: getCurrentTimestamp(),
@@ -154,17 +167,19 @@ func (s *Server) readPump(c *Client) {
 		}
 		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 
+		// Rejected messages are counted rather than logged so a misbehaving
+		// client cannot flood the log.
 		switch msg.Type {
 		case MessageTypeAuth:
 			s.handleAuth(c, msg)
 		case MessageTypeMessage:
 			if !c.isAuthenticated() {
-				log.Printf("dropping message from unauthenticated client")
+				s.hub.metrics.droppedUnauth.Add(1)
 				continue
 			}
 			s.handleChat(c, msg)
 		default:
-			log.Printf("unknown message type: %q", msg.Type)
+			s.hub.metrics.droppedInvalid.Add(1)
 		}
 	}
 }
@@ -198,26 +213,42 @@ func (s *Server) handleAuth(c *Client, msg Message) {
 	clientType, _ := msg.Payload["clientType"].(string)
 	c.authenticate(id, clientType)
 
-	// Queue the response before registering so the client always sees it
-	// before any join event.
-	c.trySend(Message{
-		Type:      MessageTypeAuthResponse,
-		ClientID:  id,
-		Timestamp: getCurrentTimestamp(),
-		Payload: map[string]interface{}{
-			"success":     true,
-			"resumeToken": s.signer.sign(id),
-		},
-	})
-	if !s.hub.register(c) {
-		c.disconnect()
+	// The hub queues this as the client's first message, together with the
+	// list of who is online, so the client never sees a presence event first.
+	welcome := func(clientList []string) Message {
+		return Message{
+			Type:      MessageTypeAuthResponse,
+			ClientID:  id,
+			Timestamp: getCurrentTimestamp(),
+			Payload: map[string]interface{}{
+				"success":     true,
+				"resumeToken": s.signer.sign(id),
+				"clientList":  clientList,
+			},
+		}
 	}
+	if !s.hub.register(c, welcome) {
+		c.disconnect()
+		return
+	}
+	s.hub.metrics.authSuccess.Add(1)
 }
 
 func (s *Server) handleChat(c *Client, msg Message) {
+	if !c.limiter.allow(time.Now()) {
+		s.hub.metrics.droppedRateLimited.Add(1)
+		c.trySend(Message{
+			Type:      MessageTypeError,
+			Timestamp: getCurrentTimestamp(),
+			Payload:   map[string]interface{}{"reason": "rate limited"},
+		})
+		return
+	}
+
 	text, _ := msg.Payload["text"].(string)
 	text = strings.TrimSpace(text)
 	if text == "" || utf8.RuneCountInString(text) > maxTextRunes {
+		s.hub.metrics.droppedInvalid.Add(1)
 		return
 	}
 	recipient, _ := msg.Payload["recipientId"].(string)
@@ -225,6 +256,7 @@ func (s *Server) handleChat(c *Client, msg Message) {
 		recipient = RecipientAll
 	}
 
+	s.hub.metrics.messagesReceived.Add(1)
 	// Rebuild the payload rather than relaying whatever the client sent.
 	s.hub.routeChat(c, Message{
 		Type:      MessageTypeMessage,

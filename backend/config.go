@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,12 @@ type Config struct {
 	AllowedOrigins []string
 	// SessionSecret signs the resume tokens that let a client reclaim its ID.
 	SessionSecret []byte
+	// RateLimit is the sustained chat messages per second allowed per client
+	// (burst is twice that). 0 disables limiting.
+	RateLimit float64
+	// MetricsEnabled exposes /metrics. It reveals runtime details, so keep it
+	// off public interfaces.
+	MetricsEnabled bool
 	// SessionSecretGenerated is true when no SESSION_SECRET was provided and a
 	// random one was created, so sessions will not survive a restart.
 	SessionSecretGenerated bool
@@ -30,6 +37,8 @@ type Config struct {
 //	ADDR             listen address (default ":8080"; PORT is used if ADDR is unset)
 //	ALLOWED_ORIGINS  comma-separated origins (default "http://localhost:3000")
 //	SESSION_SECRET   key for signing resume tokens (default: random per process)
+//	RATE_LIMIT       chat messages/second per client, 0 to disable (default 10)
+//	METRICS_ENABLED  "true" to serve /metrics (default false)
 func LoadConfig(getenv func(string) string) (Config, error) {
 	cfg := Config{AuthToken: getenv("AUTH_TOKEN")}
 	if cfg.AuthToken == "" {
@@ -54,6 +63,16 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 			cfg.AllowedOrigins = append(cfg.AllowedOrigins, o)
 		}
 	}
+
+	cfg.RateLimit = 10
+	if v := getenv("RATE_LIMIT"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 {
+			return Config{}, fmt.Errorf("RATE_LIMIT must be a non-negative number, got %q", v)
+		}
+		cfg.RateLimit = f
+	}
+	cfg.MetricsEnabled, _ = strconv.ParseBool(getenv("METRICS_ENABLED"))
 
 	if s := getenv("SESSION_SECRET"); s != "" {
 		cfg.SessionSecret = []byte(s)
