@@ -5,28 +5,28 @@ import {
 } from "@/providers/websocketProvider";
 import { cn } from "@/lib/utils";
 
-type View = { label: string; detail: string; dot: string; pulse: boolean };
+type View = { label: string; dot: string; pulse: boolean };
 
 export function describeConnection(
   status: WebSocketState,
   authState: AuthState
 ): View {
   if (status === WebSocketStateEnum.OPEN && authState === "authenticated") {
-    return { label: "Connected", detail: "Authenticated", dot: "bg-ok", pulse: false };
+    return { label: "Live", dot: "bg-ok", pulse: false };
   }
   if (status === WebSocketStateEnum.OPEN) {
-    return { label: "Signing in", detail: "Waiting for the server", dot: "bg-signal", pulse: true };
+    return { label: "Signing in", dot: "bg-signal", pulse: true };
   }
   if (status === WebSocketStateEnum.RECONNECTING) {
-    return { label: "Reconnecting", detail: "Retrying with backoff", dot: "bg-private", pulse: true };
+    return { label: "Reconnecting", dot: "bg-private", pulse: true };
   }
   if (status === WebSocketStateEnum.CONNECTING) {
-    return { label: "Connecting", detail: "Opening the socket", dot: "bg-signal", pulse: true };
+    return { label: "Connecting", dot: "bg-signal", pulse: true };
   }
-  return { label: "Disconnected", detail: "Not connected to the server", dot: "bg-bad", pulse: false };
+  return { label: "Offline", dot: "bg-bad", pulse: false };
 }
 
-export function ConnectionStatus({
+export function ConnectionPill({
   status,
   authState,
 }: {
@@ -35,8 +35,11 @@ export function ConnectionStatus({
 }) {
   const v = describeConnection(status, authState);
   return (
-    <div role="status" className="flex items-center gap-3">
-      <span className="relative flex size-2.5">
+    <span
+      role="status"
+      className="inline-flex items-center gap-2 rounded-full bg-hover px-2.5 py-1 text-xs font-medium"
+    >
+      <span className="relative flex size-2">
         {v.pulse && (
           <span
             className={cn(
@@ -45,12 +48,9 @@ export function ConnectionStatus({
             )}
           />
         )}
-        <span className={cn("relative inline-flex size-2.5 rounded-full", v.dot)} />
+        <span className={cn("relative inline-flex size-2 rounded-full", v.dot)} />
       </span>
-      <div className="leading-tight">
-        <p className="text-sm font-medium">{v.label}</p>
-        <p className="text-xs text-muted">{v.detail}</p>
-      </div>
-    </div>
+      {v.label}
+    </span>
   );
 }

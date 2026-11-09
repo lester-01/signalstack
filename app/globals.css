@@ -3,38 +3,43 @@
 /* Palette: cool paper and ink, one signal blue, amber reserved for private
    messages. Client colors come from lib/identity.ts. */
 :root {
-  --paper: #edf0f3;
-  --panel: #f9fafb;
+  --canvas: #e6e9ee;
+  --paper: #f3f5f8;
+  --panel: #ffffff;
   --ink: #121b26;
   --muted: #5b6877;
   --line: #d5dbe2;
-  --hover: #e2e7ec;
+  --hover: #eceff3;
   --bubble: #ffffff;
   --signal: #2347f5;
   --private: #b45f06;
   --ok: #0e8a5f;
   --bad: #c2362b;
   --id-l: 0.5;
+  --tint-l: 0.94;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --canvas: #0a0f15;
     --paper: #0e141b;
-    --panel: #141c25;
+    --panel: #131b24;
     --ink: #e8edf2;
     --muted: #93a0ae;
     --line: #26323f;
-    --hover: #1d2834;
+    --hover: #1c2631;
     --bubble: #1b2531;
     --signal: #4a68ff;
     --private: #e39a3b;
     --ok: #34c795;
     --bad: #f0675c;
     --id-l: 0.68;
+    --tint-l: 0.3;
   }
 }
 
 @theme inline {
+  --color-canvas: var(--canvas);
   --color-paper: var(--paper);
   --color-panel: var(--panel);
   --color-ink: var(--ink);

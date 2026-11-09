@@ -19,7 +19,7 @@ Design notes and the wire protocol: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 https://github.com/user-attachments/assets/f102ed96-9df4-4a40-8cb3-fa7ed6bd5c59
 
-Open several browser tabs to see realtime sync. More screenshots are in [`demo/`](demo/).
+Open several browser tabs to see realtime sync. To re-record the video and screenshots, see [docs/DEMO.md](docs/DEMO.md). More screenshots are in [`demo/`](demo/).
 
 ## Quick start
 

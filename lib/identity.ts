@@ -25,3 +25,8 @@ export function idInitials(id: string): string {
 export function shortId(id: string): string {
   return id.length > 10 ? id.slice(0, 8) : id;
 }
+
+/** Soft background tint for a sender's messages. --tint-l is set per color scheme. */
+export function idTint(id: string): string {
+  return `oklch(var(--tint-l) 0.05 ${idHue(id)})`;
+}

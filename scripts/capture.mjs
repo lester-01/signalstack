@@ -1,76 +1,187 @@
 #!/usr/bin/env node
-// Records the demo assets: screenshots and a side-by-side video of two clients
-// chatting. Needs Playwright (npm i -g playwright, or npx playwright install
-// chromium) and ffmpeg on PATH.
-//
-//   1. Start the backend:  cd backend && AUTH_TOKEN=demo go run .
-//   2. Start the frontend: npm run dev   (with NEXT_PUBLIC_AUTH_TOKEN=demo)
-//   3. node scripts/capture.mjs
-//
-// Env: APP_URL (default http://localhost:3000), OUT (default ./capture-out)
-import { chromium } from "playwright";
+// Records the demo from the scenario in docs/DEMO.md: one video per person and
+// per layout (desktop, mobile), kept in sync, plus screenshots.
+// See docs/DEMO.md for what it produces and how to run it.
+// Needs Playwright with Chromium, and ffmpeg on PATH.
+import { chromium, devices } from "playwright";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 const OUT = path.resolve(process.env.OUT ?? "capture-out");
-const W = 640, H = 720; // each side; the stacked video is 1280x720
-fs.mkdirSync(OUT, { recursive: true });
-const tmp = fs.mkdtempSync(path.join(OUT, "video-"));
+const LEAD_S = 0.5; // lead-in kept before the first step
+const only = process.argv.find((a) => a.startsWith("--only="))?.split("=")[1];
 
-const browser = await chromium.launch();
-const open = async (name, scheme = "light") => {
-  const ctx = await browser.newContext({
-    viewport: { width: W, height: H },
-    colorScheme: scheme,
-    deviceScaleFactor: 2,
-    recordVideo: { dir: path.join(tmp, name), size: { width: W, height: H } },
-  });
-  const page = await ctx.newPage();
-  await page.goto(APP_URL);
-  await page.getByText("Connected", { exact: true }).waitFor();
-  return { ctx, page };
+// ---- scenario: the first json block under "## Scenario" in docs/DEMO.md ----
+const md = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "../docs/DEMO.md"),
+  "utf8"
+);
+const block = md.split("## Scenario")[1]?.match(/```json\n([\s\S]*?)\n```/);
+if (!block) throw new Error("no json block under '## Scenario' in docs/DEMO.md");
+const scenario = JSON.parse(block[1]);
+
+// ---- layouts ----
+const phone = { ...devices["iPhone 14"] };
+delete phone.defaultBrowserType;
+const LAYOUTS = {
+  desktop: { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 },
+  mobile: { ...phone, deviceScaleFactor: 3 },
 };
 
-const alice = await open("alice");
-const bob = await open("bob");
-const pause = (ms) => alice.page.waitForTimeout(ms);
-const say = async (p, text) => {
-  await p.locator("#composer").pressSequentially(text, { delay: 45 });
-  await pause(250);
-  await p.keyboard.press("Enter");
-  await pause(900);
+// ---- human typing, seeded so reruns have the same rhythm ----
+let seed = scenario.seed ?? 1;
+const rand = () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
+const between = (a, b) => a + rand() * (b - a);
 
-await pause(1200);
-await say(alice.page, "Anyone here? Testing the broadcast path.");
-await say(bob.page, "Loud and clear. I can see you in the list.");
-// Private message: pick the other client in the presence list.
-await alice.page.locator("aside ul button").nth(1).click();
-await say(alice.page, "This one is just between us.");
-await bob.page.locator("aside ul button").nth(1).click();
-await say(bob.page, "Got it. Private messages are amber.");
-await pause(1500);
-
-await alice.page.screenshot({ path: path.join(OUT, "chat-alice.png") });
-await bob.page.screenshot({ path: path.join(OUT, "chat-bob.png") });
-
-// Closing the contexts is what finalizes the video files.
-const videos = {};
-for (const [name, c] of Object.entries({ alice, bob })) {
-  const v = c.page.video();
-  await c.ctx.close();
-  videos[name] = await v.path();
+async function typeText(page, text) {
+  for (const ch of text) {
+    await page.keyboard.type(ch);
+    const slow = ".,!?".includes(ch) ? between(120, 320) : ch === " " ? between(20, 90) : 0;
+    await page.waitForTimeout(between(55, 135) + slow);
+  }
 }
-await browser.close();
+async function backspace(page, n, fast = false) {
+  for (let i = 0; i < n; i++) {
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(fast ? between(35, 60) : between(70, 120));
+  }
+}
 
-execFileSync("ffmpeg", [
-  "-y", "-loglevel", "error",
-  "-i", videos.alice, "-i", videos.bob,
-  "-filter_complex", `[0:v]scale=${W}:${H}[a];[1:v]scale=${W}:${H}[b];[a][b]hstack=inputs=2,fps=30[v]`,
-  "-map", "[v]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-  path.join(OUT, "two-clients.mp4"),
-]);
-fs.rmSync(tmp, { recursive: true, force: true });
+async function say(page, step) {
+  const composer = page.locator("#composer");
+  await page.waitForTimeout(between(500, 900)); // read, then reach for the keyboard
+  await composer.click();
+  if (step.draft) {
+    await typeText(page, step.draft);
+    await page.waitForTimeout(between(800, 1100));
+    await backspace(page, step.draft.length, true);
+    await page.waitForTimeout(between(500, 800));
+  }
+  if (step.fumble) {
+    let p = 0;
+    while (p < step.fumble.length && step.fumble[p] === step.say[p]) p++;
+    await typeText(page, step.fumble);
+    await page.waitForTimeout(between(450, 750)); // notice the mistake
+    await backspace(page, step.fumble.length - p);
+    await typeText(page, step.say.slice(p));
+  } else {
+    await typeText(page, step.say);
+  }
+  await page.waitForTimeout(between(250, 450));
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(between(700, 1000));
+}
+
+async function pick(page, which) {
+  // On mobile the people list lives in a sheet behind this button.
+  const sheetButton = page.getByRole("button", { name: /online/ });
+  if (await sheetButton.isVisible()) await sheetButton.click();
+  const buttons = page.locator("button[aria-pressed]:visible");
+  await buttons.nth(which === "everyone" ? 0 : 1).waitFor({ timeout: 8000 });
+  await page.waitForTimeout(between(300, 600));
+  await buttons.nth(which === "everyone" ? 0 : 1).click();
+  await page.waitForTimeout(between(500, 800));
+}
+
+// ---- one take: all people at once, one layout ----
+async function take(layout) {
+  const dir = path.join(OUT, layout);
+  const tmp = path.join(OUT, `.tmp-${layout}`);
+  fs.mkdirSync(path.join(OUT, "screenshots"), { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
+
+  const browser = await chromium.launch();
+  const people = {};
+  await Promise.all(
+    scenario.people.map(async (name) => {
+      const opts = LAYOUTS[layout];
+      const ctx = await browser.newContext({
+        ...opts,
+        colorScheme: "light",
+        recordVideo: { dir: path.join(tmp, name), size: opts.viewport },
+      });
+      const page = await ctx.newPage();
+      const created = Date.now();
+      await page.goto(APP_URL);
+      await page.getByRole("status").getByText("Live").waitFor({ timeout: 15000 });
+      people[name] = { ctx, page, created };
+    })
+  );
+
+  const start = Date.now();
+  const log = [];
+  const stamp = (what) => log.push({ t: Date.now() - start, what });
+
+  for (const step of scenario.steps) {
+    if (step.wait) {
+      await people[scenario.people[0]].page.waitForTimeout(step.wait);
+    } else if (step.shot) {
+      stamp(`screenshot ${step.shot}`);
+      await Promise.all(
+        Object.entries(people).map(([name, p]) =>
+          p.page.screenshot({
+            path: path.join(OUT, "screenshots", `${step.shot}-${name}-${layout}.png`),
+          })
+        )
+      );
+    } else if (step.say) {
+      stamp(`${step.who} says: ${step.say}`);
+      await say(people[step.who].page, step);
+      stamp(`${step.who} sent`);
+    } else if (step.pick) {
+      stamp(`${step.who} picks ${step.pick}`);
+      await pick(people[step.who].page, step.pick);
+    }
+  }
+  const end = Date.now();
+
+  const videos = {};
+  for (const [name, p] of Object.entries(people)) {
+    const v = p.page.video();
+    await p.ctx.close(); // finalizes the video file
+    videos[name] = { file: await v.path(), created: p.created };
+  }
+  await browser.close();
+
+  // Trim every video to the same wall-clock window, so they line up.
+  const duration = (end - start) / 1000 + LEAD_S;
+  for (const [name, v] of Object.entries(videos)) {
+    const ss = Math.max(0, (start - v.created) / 1000 - LEAD_S);
+    execFileSync("ffmpeg", [
+      "-y", "-loglevel", "error", "-ss", ss.toFixed(3), "-i", v.file,
+      "-t", duration.toFixed(3), "-r", "30",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-an",
+      path.join(dir, `${name}.mp4`),
+    ]);
+  }
+  const names = scenario.people;
+  execFileSync("ffmpeg", [
+    "-y", "-loglevel", "error",
+    ...names.flatMap((n) => ["-i", path.join(dir, `${n}.mp4`)]),
+    "-filter_complex",
+    names.map((_, i) => `[${i}:v]scale=-2:720[v${i}]`).join(";") +
+      `;${names.map((_, i) => `[v${i}]`).join("")}hstack=inputs=${names.length}[o]`,
+    "-map", "[o]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+    path.join(OUT, `preview-${layout}.mp4`),
+  ]);
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.writeFileSync(
+    path.join(OUT, layout, "manifest.json"),
+    JSON.stringify({ layout, durationSeconds: duration, leadSeconds: LEAD_S, events: log }, null, 2)
+  );
+  console.log(`${layout}: ${names.join(" + ")} recorded, ${duration.toFixed(1)}s each`);
+}
+
+fs.mkdirSync(OUT, { recursive: true });
+for (const layout of Object.keys(LAYOUTS)) {
+  if (!only || only === layout) await take(layout);
+}
 console.log("wrote", OUT);
