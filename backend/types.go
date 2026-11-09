@@ -8,8 +8,8 @@ const (
 	MessageTypeAuth         = "auth"
 	MessageTypeAuthResponse = "auth_response"
 	MessageTypeHeartbeat    = "heartbeat"
-	MessageTypeJoin         = "join"
-	MessageTypeLeave        = "leave"
+	MessageTypePresence     = "presence"
+	MessageTypeError        = "error"
 )
 
 // RecipientAll addresses a chat message to every connected client.

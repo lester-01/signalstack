@@ -28,10 +28,12 @@ type Client struct {
 	id            string
 	authenticated bool
 	clientType    string
+	authed        chan struct{} // closed once the client authenticates
 
 	ctx     context.Context
 	cancel  context.CancelFunc
 	evicted atomic.Bool
+	limiter *rateLimiter // chat rate limit; only used by the reader goroutine
 
 	conn *websocket.Conn
 	send chan Message
@@ -44,6 +46,7 @@ func NewClient(conn *websocket.Conn) *Client {
 		ctx:    ctx,
 		cancel: cancel,
 		conn:   conn,
+		authed: make(chan struct{}),
 		send:   make(chan Message, sendBufferSize),
 	}
 }
@@ -64,7 +67,10 @@ func (c *Client) isAuthenticated() bool {
 func (c *Client) authenticate(id, clientType string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.authenticated = true
+	if !c.authenticated {
+		c.authenticated = true
+		close(c.authed)
+	}
 	c.id = id
 	c.clientType = clientType
 }

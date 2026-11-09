@@ -4,7 +4,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +50,7 @@ type testClient struct {
 	conn   *websocket.Conn
 	id     string
 	resume string
+	list   []string // clientList from the auth_response
 	inbox  chan Message
 	done   chan struct{}
 	err    error // valid once done is closed
@@ -155,6 +158,11 @@ func (c *testClient) finishAuth(t *testing.T) {
 	}
 	c.id = m.ClientID
 	c.resume, _ = m.Payload["resumeToken"].(string)
+	raw, _ := m.Payload["clientList"].([]interface{})
+	c.list = c.list[:0]
+	for _, v := range raw {
+		c.list = append(c.list, v.(string))
+	}
 }
 
 func login(t *testing.T, url string) *testClient {
@@ -272,21 +280,105 @@ func TestMessageRouting(t *testing.T) {
 	}
 }
 
-func TestPresenceEvents(t *testing.T) {
+func TestPresenceIsSnapshotPlusDeltas(t *testing.T) {
 	_, url := startServer(t, testConfig())
 	a := login(t, url)
-	b := login(t, url)
+	if !reflect.DeepEqual(a.list, []string{a.id}) {
+		t.Fatalf("first client's welcome list = %v, want just itself", a.list)
+	}
 
-	if _, ok := a.expect(func(m Message) bool { return m.Type == MessageTypeJoin && m.ClientID == b.id }, 2*time.Second); !ok {
+	b := login(t, url)
+	want := []string{a.id, b.id}
+	sort.Strings(want)
+	if !reflect.DeepEqual(b.list, want) {
+		t.Fatalf("second client's welcome list = %v, want %v", b.list, want)
+	}
+
+	contains := func(payload interface{}, id string) bool {
+		list, _ := payload.([]interface{})
+		for _, v := range list {
+			if v == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	joined, ok := a.expect(func(m Message) bool {
+		return m.Type == MessageTypePresence && contains(m.Payload["joined"], b.id)
+	}, 2*time.Second)
+	if !ok {
 		t.Fatal("a never saw b join")
 	}
+	if _, full := joined.Payload["clientList"]; full {
+		t.Fatal("presence must carry only the change, not the full client list")
+	}
+	if n, _ := joined.Payload["userCount"].(float64); n != 2 {
+		t.Fatalf("userCount = %v, want 2", joined.Payload["userCount"])
+	}
+
 	b.conn.Close()
-	m, ok := a.expect(func(m Message) bool { return m.Type == MessageTypeLeave && m.ClientID == b.id }, 2*time.Second)
+	left, ok := a.expect(func(m Message) bool {
+		return m.Type == MessageTypePresence && contains(m.Payload["left"], b.id)
+	}, 2*time.Second)
 	if !ok {
 		t.Fatal("a never saw b leave")
 	}
-	if n, _ := m.Payload["userCount"].(float64); n != 1 {
-		t.Fatalf("userCount after leave = %v, want 1", m.Payload["userCount"])
+	if n, _ := left.Payload["userCount"].(float64); n != 1 {
+		t.Fatalf("userCount = %v, want 1", left.Payload["userCount"])
+	}
+}
+
+// Many simultaneous disconnects must not produce a flood of per-client events
+// or evict clients that are merely shutting down.
+func TestMassDisconnectIsBatched(t *testing.T) {
+	s, url := startServer(t, testConfig())
+	observer := login(t, url)
+
+	const n = 150
+	clients := make([]*testClient, n)
+	for i := range clients {
+		clients[i] = login(t, url)
+	}
+	eventually(t, 3*time.Second, "all clients registered", func() bool { return len(s.hub.clientIDs()) == n+1 })
+	// Let the join presence messages settle, then discard them.
+	time.Sleep(3 * presenceInterval)
+	for drained := false; !drained; {
+		select {
+		case <-observer.inbox:
+		default:
+			drained = true
+		}
+	}
+
+	for _, c := range clients {
+		c.conn.Close()
+	}
+	eventually(t, 5*time.Second, "everyone to leave", func() bool { return len(s.hub.clientIDs()) == 1 })
+	time.Sleep(3 * presenceInterval)
+
+	presence := 0
+	left := 0
+	for drained := false; !drained; {
+		select {
+		case m := <-observer.inbox:
+			if m.Type == MessageTypePresence {
+				presence++
+				l, _ := m.Payload["left"].([]interface{})
+				left += len(l)
+			}
+		default:
+			drained = true
+		}
+	}
+	if left != n {
+		t.Fatalf("observer was told %d clients left, want %d", left, n)
+	}
+	if presence > n/5 {
+		t.Fatalf("%d presence messages for %d departures; they should be batched", presence, n)
+	}
+	if got := s.hub.metrics.evictions.Load(); got != 0 {
+		t.Fatalf("%d clients were evicted during a mass disconnect", got)
 	}
 }
 
