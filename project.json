@@ -21,5 +21,6 @@
     "website": null
   },
   "reviewed_at": "2026-11-03",
-  "demo": "local"
+  "demo": "local",
+  "display_name": "SignalStack"
 }
