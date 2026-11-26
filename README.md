@@ -1,6 +1,10 @@
 # SignalStack
 
+Built by [Ben Lester](https://benlester.me), a software and systems engineer. More of my work: [projects.benlester.me](https://projects.benlester.me).
+
 A realtime chat server in Go with a Next.js client, built to explore how a WebSocket server handles many concurrent connections: routing, backpressure, shutdown, and reconnects. It is a systems exercise, not a chat product.
+
+It runs locally: it is not hosted anywhere, so there is no live demo. See the video and screenshots below, or follow the quick start.
 
 Design notes and the wire protocol: [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -18,6 +22,8 @@ Design notes and the wire protocol: [ARCHITECTURE.md](ARCHITECTURE.md).
 ## Demo
 
 https://github.com/user-attachments/assets/f102ed96-9df4-4a40-8cb3-fa7ed6bd5c59
+
+![SignalStack chat UI](demo/Screenshot%202026-05-20%20204448.png)
 
 Open several browser tabs to see realtime sync. More screenshots are in [`demo/`](demo/).
 

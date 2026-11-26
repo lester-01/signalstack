@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "status": "live",
+  "status": "finished",
   "tags": [
     "go",
     "websocket",
     "nextjs",
-    "realtime"
+    "realtime",
+    "typescript"
   ],
   "languages": [
-    "TypeScript",
     "Go",
+    "TypeScript",
     "CSS",
     "JavaScript"
   ],
@@ -19,5 +20,6 @@
     "rank": 1500,
     "website": null
   },
-  "reviewed_at": "2026-11-03"
+  "reviewed_at": "2026-11-03",
+  "demo": "local"
 }
